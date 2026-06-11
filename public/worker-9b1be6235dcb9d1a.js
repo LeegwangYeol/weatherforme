@@ -1,0 +1,1 @@
+self.addEventListener("push",i=>{let t=i.data?.json()??{title:"Weather Alert",body:"비가 올 예정입니다!"};i.waitUntil(self.registration.showNotification(t.title,{body:t.body,icon:"/icon-192x192.png",badge:"/icon-192x192.png",vibrate:[200,100,200]}))}),self.addEventListener("notificationclick",i=>{i.notification.close(),i.waitUntil(self.clients.openWindow("/"))});
