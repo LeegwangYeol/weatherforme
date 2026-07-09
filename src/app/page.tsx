@@ -196,6 +196,19 @@ export default function Home() {
     () => localStorage.getItem(LOCATION_STORAGE_KEY),
     null
   );
+  // 카톡/인스타/페북/네이버 등 인앱 브라우저 — 설치·푸시 불가라 기본 브라우저로 유도
+  const inAppBrowser = useClientValue(
+    () =>
+      /KAKAOTALK|Instagram|FBAN|FBAV|FB_IAB|NAVER\(inapp|DaumApps|\bLine\//i.test(
+        navigator.userAgent
+      ),
+    false
+  );
+  // iOS 버전 (웹 푸시는 16.4+) — UA의 "OS 16_3" 패턴에서 추출
+  const iosVersion = useClientValue(() => {
+    const m = navigator.userAgent.match(/OS (\d+)[._](\d+)/);
+    return m ? Number(m[1]) + Number(m[2]) / 10 : 0;
+  }, 0);
 
   // --- 위치: 저장된 값 + 세션 내 갱신 ---
   const savedLocation = useMemo<Coords | null>(() => {
@@ -460,6 +473,7 @@ export default function Home() {
   const pushSupport = swFailed ? "unsupported" : pushEnv;
   // iOS는 홈 화면에 설치된 상태에서만 웹 푸시 지원 (iOS 16.4+)
   const iosNeedsInstall = isIOS && !isStandalone;
+  const iosTooOld = isIOS && iosVersion > 0 && iosVersion < 16.4;
   const data = weather.status === "ready" ? weather.data : null;
   const condition = data ? conditionOf(data.current.pty, data.hourly[0]?.sky ?? 1) : null;
   const weatherLoading = Boolean(location) && weather.status === "idle";
@@ -674,7 +688,20 @@ export default function Home() {
             </div>
           </div>
 
-          {pushSupport === "unsupported" && (
+          {inAppBrowser && (
+            <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
+              카카오톡·인스타 같은 <b>인앱 브라우저</b>에서는 알림을 받을 수 없어요. 오른쪽 위
+              메뉴에서 <b>&ldquo;Safari로 열기&rdquo;</b>(아이폰) 또는{" "}
+              <b>&ldquo;다른 브라우저로 열기&rdquo;</b>(안드로이드)를 눌러주세요.
+            </p>
+          )}
+          {!inAppBrowser && iosTooOld && (
+            <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
+              아이폰 알림은 <b>iOS 16.4 이상</b>부터 지원돼요. 설정 → 일반 → 소프트웨어
+              업데이트 후 다시 시도해주세요.
+            </p>
+          )}
+          {!inAppBrowser && !iosTooOld && pushSupport === "unsupported" && (
             <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
               이 브라우저는 푸시 알림을 지원하지 않아요.
             </p>
@@ -685,7 +712,7 @@ export default function Home() {
               <code className="text-xs">npm run build && npm start</code>)에서 테스트하세요.
             </p>
           )}
-          {pushSupport === "ok" && iosNeedsInstall && (
+          {pushSupport === "ok" && !inAppBrowser && !iosTooOld && iosNeedsInstall && (
             <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
               아이폰은 <b>홈 화면에 추가한 앱에서만</b> 알림을 받을 수 있어요. 아래 안내를 따라
               먼저 설치해주세요.
@@ -693,6 +720,8 @@ export default function Home() {
           )}
 
           {pushSupport === "ok" &&
+            !inAppBrowser &&
+            !iosTooOld &&
             !iosNeedsInstall &&
             (isSubscribed ? (
               <button
@@ -730,7 +759,13 @@ export default function Home() {
               </div>
             </div>
 
-            {isIOS ? (
+            {inAppBrowser ? (
+              <p className="text-sm font-medium text-[#5a6b8c] bg-[#f2f6fc] rounded-2xl p-4">
+                지금은 <b>인앱 브라우저</b>라 설치가 안 돼요. 오른쪽 위 메뉴(⋮ 또는 공유)에서{" "}
+                <b>&ldquo;Safari로 열기&rdquo;</b>(아이폰) /{" "}
+                <b>&ldquo;다른 브라우저로 열기&rdquo;</b>(안드로이드)를 누른 뒤 설치해주세요.
+              </p>
+            ) : isIOS ? (
               <ol className="text-sm font-medium text-[#5a6b8c] space-y-2 bg-[#f2f6fc] rounded-2xl p-4">
                 <li className="flex items-center gap-2">
                   <span className="text-[#9aa7c0]">1.</span> Safari 하단의{" "}

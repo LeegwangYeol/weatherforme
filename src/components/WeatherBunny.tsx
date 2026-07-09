@@ -1,42 +1,82 @@
-// 날씨에 반응하는 토끼 캐릭터 — 비(우산), 눈(목도리+눈송이), 뇌우(놀람+번개),
-// 맑음(해+감은 눈웃음), 흐림(구름), idle(기본)
+// 날씨에 반응하는 토끼 캐릭터 2.0
+// - 몸통/앞발이 있는 아기 비율 + ω 입 + 수염 + 볼터치
+// - 둥실 떠다니기, 눈 깜빡임, 빗방울/눈송이 낙하, 우산 흔들림 애니메이션
+// - prefers-reduced-motion 이면 모든 애니메이션 정지
 export type BunnyKind = "sun" | "cloud" | "rain" | "snow" | "thunder" | "idle";
 
-const OUTLINE = "#52465e";
-const PINK = "#ffd1de";
+const OUTLINE = "#4a3f55";
+const PINK_INNER = "#ffd3df";
 const BLUSH = "#ffc2d1";
+const NOSE = "#f49ab1";
+const BODY = "#f6f0fa";
+const WHISKER = "#d8cce2";
 const YELLOW = "#ffd166";
-const YELLOW_DEEP = "#f2b94a";
+const YELLOW_DEEP = "#eab54a";
 const BLUE = "#5b8def";
 
 function Eyes({ kind }: { kind: BunnyKind }) {
   if (kind === "sun") {
-    // 기분 좋은 눈웃음
+    // 행복한 눈웃음
     return (
-      <g stroke={OUTLINE} strokeWidth={4.5} strokeLinecap="round" fill="none">
-        <path d="M71 116 Q80 107 89 116" />
-        <path d="M111 116 Q120 107 129 116" />
+      <g stroke={OUTLINE} strokeWidth={5} strokeLinecap="round" fill="none">
+        <path d="M69 118 Q78 108 87 118" />
+        <path d="M113 118 Q122 108 131 118" />
       </g>
     );
   }
   if (kind === "thunder") {
-    // 깜짝 놀란 눈
+    // 깜짝 놀란 왕눈이
     return (
       <g>
-        <circle cx={80} cy={115} r={7} fill={OUTLINE} />
-        <circle cx={120} cy={115} r={7} fill={OUTLINE} />
-        <circle cx={82.5} cy={112.5} r={2.4} fill="#fff" />
-        <circle cx={122.5} cy={112.5} r={2.4} fill="#fff" />
+        <circle cx={78} cy={117} r={8.5} fill={OUTLINE} />
+        <circle cx={122} cy={117} r={8.5} fill={OUTLINE} />
+        <circle cx={81} cy={114} r={3} fill="#fff" />
+        <circle cx={125} cy={114} r={3} fill="#fff" />
+        <circle cx={75.5} cy={120} r={1.4} fill="#fff" opacity={0.8} />
+        <circle cx={119.5} cy={120} r={1.4} fill="#fff" opacity={0.8} />
       </g>
     );
   }
+  // 기본: 반짝이 두 개 + 깜빡임
   return (
-    <g>
-      <circle cx={80} cy={115} r={5.5} fill={OUTLINE} />
-      <circle cx={120} cy={115} r={5.5} fill={OUTLINE} />
-      <circle cx={82} cy={113} r={1.8} fill="#fff" />
-      <circle cx={122} cy={113} r={1.8} fill="#fff" />
+    <g className="wfb-eye-blink">
+      <circle cx={78} cy={118} r={7.5} fill={OUTLINE} />
+      <circle cx={122} cy={118} r={7.5} fill={OUTLINE} />
+      <circle cx={80.5} cy={115.5} r={2.8} fill="#fff" />
+      <circle cx={124.5} cy={115.5} r={2.8} fill="#fff" />
+      <circle cx={76} cy={121} r={1.3} fill="#fff" opacity={0.85} />
+      <circle cx={120} cy={121} r={1.3} fill="#fff" opacity={0.85} />
     </g>
+  );
+}
+
+function Mouth({ kind }: { kind: BunnyKind }) {
+  if (kind === "thunder") {
+    // 놀라서 벌어진 입
+    return (
+      <ellipse cx={100} cy={134} rx={4} ry={5} fill="none" stroke={OUTLINE} strokeWidth={2.6} />
+    );
+  }
+  if (kind === "sun") {
+    return (
+      <path
+        d="M90 130 Q100 140 110 130"
+        stroke={OUTLINE}
+        strokeWidth={2.8}
+        strokeLinecap="round"
+        fill="none"
+      />
+    );
+  }
+  // 기본 ω 입
+  return (
+    <path
+      d="M91 131 Q95.5 138 100 131 Q104.5 138 109 131"
+      stroke={OUTLINE}
+      strokeWidth={2.6}
+      strokeLinecap="round"
+      fill="none"
+    />
   );
 }
 
@@ -55,35 +95,61 @@ export default function WeatherBunny({
       role="img"
       aria-label="날씨 토끼"
     >
-      {/* 그림자 */}
-      <ellipse cx={100} cy={187} rx={42} ry={7} fill="#3d3652" opacity={0.08} />
+      <style>{`
+        .wfb-float { animation: wfb-float 3.4s ease-in-out infinite; }
+        .wfb-eye-blink { transform-box: fill-box; transform-origin: center; animation: wfb-blink 4.6s ease-in-out infinite; }
+        .wfb-umb { transform-box: fill-box; transform-origin: 50% 100%; animation: wfb-sway 3.4s ease-in-out infinite; }
+        .wfb-drop { animation: wfb-fall 1.5s linear infinite; }
+        .wfb-drop-b { animation-delay: .5s; }
+        .wfb-drop-c { animation-delay: .9s; }
+        .wfb-drop-d { animation-delay: 1.2s; }
+        .wfb-snowf { animation: wfb-snowfall 3.2s ease-in infinite; }
+        .wfb-snowf-b { animation-delay: 1.1s; }
+        .wfb-snowf-c { animation-delay: 2.2s; }
+        .wfb-rays { transform-box: fill-box; transform-origin: center; animation: wfb-spin 26s linear infinite; }
+        .wfb-twinkle { animation: wfb-twinkle 2.4s ease-in-out infinite; }
+        .wfb-twinkle-b { animation-delay: 1.2s; }
+        @keyframes wfb-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @keyframes wfb-blink { 0%,91%,100% { transform: scaleY(1); } 94% { transform: scaleY(.08); } }
+        @keyframes wfb-sway { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+        @keyframes wfb-fall { 0% { transform: translateY(-8px); opacity: 0; } 25% { opacity: .9; } 100% { transform: translateY(16px); opacity: 0; } }
+        @keyframes wfb-snowfall { 0% { transform: translateY(-6px); opacity: 0; } 30% { opacity: .9; } 100% { transform: translateY(18px); opacity: 0; } }
+        @keyframes wfb-spin { to { transform: rotate(360deg); } }
+        @keyframes wfb-twinkle { 0%,100% { opacity: .25; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.08); } }
+        @media (prefers-reduced-motion: reduce) {
+          .wfb-float, .wfb-eye-blink, .wfb-umb, .wfb-drop, .wfb-snowf, .wfb-rays, .wfb-twinkle { animation: none !important; }
+        }
+      `}</style>
 
-      {/* 배경 소품 (캐릭터 뒤) */}
+      {/* 바닥 그림자 (고정) */}
+      <ellipse cx={100} cy={189} rx={42} ry={6} fill="#3d3652" opacity={0.08} />
+
+      {/* 배경 소품 */}
       {kind === "sun" && (
         <g>
-          <circle cx={162} cy={38} r={15} fill={YELLOW} />
-          <g stroke={YELLOW} strokeWidth={4} strokeLinecap="round">
-            <line x1={162} y1={12} x2={162} y2={19} />
-            <line x1={162} y1={57} x2={162} y2={64} />
-            <line x1={136} y1={38} x2={143} y2={38} />
-            <line x1={181} y1={38} x2={188} y2={38} />
-            <line x1={144} y1={20} x2={149} y2={25} />
-            <line x1={175} y1={51} x2={180} y2={56} />
-            <line x1={180} y1={20} x2={175} y2={25} />
-            <line x1={149} y1={51} x2={144} y2={56} />
+          <circle cx={160} cy={36} r={14} fill={YELLOW} />
+          <g className="wfb-rays" stroke={YELLOW} strokeWidth={4} strokeLinecap="round">
+            <line x1={160} y1={12} x2={160} y2={18} />
+            <line x1={160} y1={54} x2={160} y2={60} />
+            <line x1={136} y1={36} x2={142} y2={36} />
+            <line x1={178} y1={36} x2={184} y2={36} />
+            <line x1={143} y1={19} x2={147.5} y2={23.5} />
+            <line x1={172.5} y1={48.5} x2={177} y2={53} />
+            <line x1={177} y1={19} x2={172.5} y2={23.5} />
+            <line x1={147.5} y1={48.5} x2={143} y2={53} />
           </g>
         </g>
       )}
       {kind === "cloud" && (
         <g fill="#ffffff" opacity={0.95} stroke="#dfe8f2" strokeWidth={2}>
-          <circle cx={30} cy={46} r={11} />
-          <circle cx={48} cy={40} r={14} />
-          <ellipse cx={42} cy={50} rx={24} ry={12} />
+          <circle cx={30} cy={44} r={10} />
+          <circle cx={46} cy={38} r={13} />
+          <ellipse cx={42} cy={48} rx={24} ry={11} />
         </g>
       )}
       {kind === "thunder" && (
         <path
-          d="M156 40 L138 76 L150 76 L134 112 L160 70 L147 70 Z"
+          d="M154 38 L136 74 L148 74 L132 110 L158 66 L145 66 Z"
           fill={YELLOW}
           stroke={YELLOW_DEEP}
           strokeWidth={2}
@@ -91,80 +157,94 @@ export default function WeatherBunny({
         />
       )}
       {kind === "snow" && (
-        <g stroke="#8fb3ff" strokeWidth={3} strokeLinecap="round" opacity={0.9}>
+        <g stroke="#a8c4ff" strokeWidth={2.6} strokeLinecap="round">
           {[
-            [36, 58],
-            [166, 74],
-            [44, 148],
-          ].map(([x, y]) => (
-            <g key={`${x}-${y}`}>
-              <line x1={x - 7} y1={y} x2={x + 7} y2={y} />
-              <line x1={x} y1={y - 7} x2={x} y2={y + 7} />
-              <line x1={x - 5} y1={y - 5} x2={x + 5} y2={y + 5} />
-              <line x1={x - 5} y1={y + 5} x2={x + 5} y2={y - 5} />
+            ["", 34, 52],
+            ["wfb-snowf-b", 166, 66],
+            ["wfb-snowf-c", 40, 140],
+          ].map(([extra, x, y]) => (
+            <g key={`${x}-${y}`} className={`wfb-snowf ${extra}`}>
+              <line x1={Number(x) - 6} y1={y} x2={Number(x) + 6} y2={y} />
+              <line x1={x} y1={Number(y) - 6} x2={x} y2={Number(y) + 6} />
+              <line x1={Number(x) - 4.2} y1={Number(y) - 4.2} x2={Number(x) + 4.2} y2={Number(y) + 4.2} />
+              <line x1={Number(x) - 4.2} y1={Number(y) + 4.2} x2={Number(x) + 4.2} y2={Number(y) - 4.2} />
             </g>
           ))}
         </g>
       )}
       {kind === "rain" && (
-        <g stroke={BLUE} strokeWidth={4.5} strokeLinecap="round" opacity={0.85}>
-          <line x1={38} y1={86} x2={32} y2={100} />
-          <line x1={166} y1={80} x2={160} y2={94} />
-          <line x1={28} y1={126} x2={22} y2={140} />
-          <line x1={174} y1={120} x2={168} y2={134} />
+        <g stroke={BLUE} strokeWidth={4.5} strokeLinecap="round">
+          <line className="wfb-drop" x1={34} y1={90} x2={29} y2={102} />
+          <line className="wfb-drop wfb-drop-b" x1={168} y1={84} x2={163} y2={96} />
+          <line className="wfb-drop wfb-drop-c" x1={24} y1={130} x2={19} y2={142} />
+          <line className="wfb-drop wfb-drop-d" x1={176} y1={126} x2={171} y2={138} />
+        </g>
+      )}
+      {kind === "idle" && (
+        <g fill="#c9b8f0">
+          <path className="wfb-twinkle" d="M36 52 L38.5 58 L44.5 60.5 L38.5 63 L36 69 L33.5 63 L27.5 60.5 L33.5 58 Z" />
+          <path className="wfb-twinkle wfb-twinkle-b" d="M164 74 L166 79 L171 81 L166 83 L164 88 L162 83 L157 81 L162 79 Z" />
         </g>
       )}
 
-      {/* 귀 (머리 뒤) */}
-      <g>
-        <ellipse cx={74} cy={52} rx={15} ry={40} fill="#fff" transform="rotate(-10 74 52)" />
-        <ellipse cx={126} cy={52} rx={15} ry={40} fill="#fff" transform="rotate(10 126 52)" />
-        <ellipse cx={74} cy={56} rx={7} ry={26} fill={PINK} transform="rotate(-10 74 56)" />
-        <ellipse cx={126} cy={56} rx={7} ry={26} fill={PINK} transform="rotate(10 126 56)" />
+      {/* ---- 캐릭터 (둥실둥실) ---- */}
+      <g className="wfb-float">
+        {/* 귀 — 왼쪽은 쫑긋, 오른쪽은 살짝 기울어서 장난스럽게 */}
+        <ellipse cx={74} cy={46} rx={14} ry={34} fill="#fff" transform="rotate(-8 74 46)" />
+        <ellipse cx={74} cy={50} rx={6.5} ry={21} fill={PINK_INNER} transform="rotate(-8 74 50)" />
+        <ellipse cx={126} cy={48} rx={14} ry={31} fill="#fff" transform="rotate(17 126 48)" />
+        <ellipse cx={126} cy={52} rx={6.5} ry={19} fill={PINK_INNER} transform="rotate(17 126 52)" />
+
+        {/* 우산 (비): 캐노피가 귀를 살짝 덮게, 통째로 살랑살랑 */}
+        {kind === "rain" && (
+          <g className="wfb-umb">
+            <line x1={100} y1={44} x2={100} y2={58} stroke="#b98a3a" strokeWidth={4} strokeLinecap="round" />
+            <path
+              d="M52 46 A48 40 0 0 1 148 46 Q136 38 124 46 Q112 38 100 46 Q88 38 76 46 Q64 38 52 46 Z"
+              fill={YELLOW}
+              stroke={YELLOW_DEEP}
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+            />
+            <line x1={100} y1={8} x2={100} y2={14} stroke={YELLOW_DEEP} strokeWidth={4} strokeLinecap="round" />
+          </g>
+        )}
+
+        {/* 몸통 + 앞발 */}
+        <ellipse cx={100} cy={163} rx={40} ry={27} fill={BODY} />
+        <ellipse cx={82} cy={184} rx={11} ry={7.5} fill="#fff" />
+        <ellipse cx={118} cy={184} rx={11} ry={7.5} fill="#fff" />
+
+        {/* 머리 — 옆으로 통통한 아기 비율 */}
+        <ellipse cx={100} cy={108} rx={58} ry={52} fill="#fff" />
+
+        {/* 목도리 (눈) */}
+        {kind === "snow" && (
+          <g fill="#9db7f5">
+            <rect x={72} y={146} width={56} height={13} rx={6.5} />
+            <rect x={108} y={156} width={12} height={20} rx={6} />
+          </g>
+        )}
+
+        {/* 수염 점 */}
+        <g fill={WHISKER}>
+          <circle cx={46} cy={119} r={1.7} />
+          <circle cx={52} cy={126} r={1.7} />
+          <circle cx={44} cy={128} r={1.7} />
+          <circle cx={154} cy={119} r={1.7} />
+          <circle cx={148} cy={126} r={1.7} />
+          <circle cx={156} cy={128} r={1.7} />
+        </g>
+
+        {/* 볼터치 */}
+        <ellipse cx={62} cy={131} rx={11} ry={7} fill={BLUSH} opacity={0.8} />
+        <ellipse cx={138} cy={131} rx={11} ry={7} fill={BLUSH} opacity={0.8} />
+
+        {/* 얼굴 */}
+        <Eyes kind={kind} />
+        <ellipse cx={100} cy={126} rx={4.2} ry={3.2} fill={NOSE} />
+        <Mouth kind={kind} />
       </g>
-
-      {/* 우산대 (머리 위로 살짝 보이게, 캐노피보다 먼저) */}
-      {kind === "rain" && (
-        <line x1={100} y1={50} x2={100} y2={78} stroke="#b98a3a" strokeWidth={4} strokeLinecap="round" />
-      )}
-
-      {/* 머리 */}
-      <circle cx={100} cy={122} r={56} fill="#fff" />
-
-      {/* 얼굴 */}
-      <Eyes kind={kind} />
-      <circle cx={66} cy={138} r={9} fill={BLUSH} opacity={0.75} />
-      <circle cx={134} cy={138} r={9} fill={BLUSH} opacity={0.75} />
-      <circle cx={100} cy={127} r={3.5} fill="#f4a0b5" />
-      <path
-        d="M92 135 Q100 142 108 135"
-        stroke={OUTLINE}
-        strokeWidth={3}
-        strokeLinecap="round"
-        fill="none"
-      />
-
-      {/* 목도리 (머리 위에 겹치게) */}
-      {kind === "snow" && (
-        <g>
-          <rect x={72} y={160} width={56} height={15} rx={7.5} fill="#9db7f5" />
-          <rect x={108} y={168} width={13} height={22} rx={6} fill="#9db7f5" />
-        </g>
-      )}
-
-      {/* 우산 캐노피 (맨 위 레이어 — 귀를 살짝 덮어 쓰고 있는 느낌) */}
-      {kind === "rain" && (
-        <g>
-          <path
-            d="M52 52 A48 42 0 0 1 148 52 Q136 44 124 52 Q112 44 100 52 Q88 44 76 52 Q64 44 52 52 Z"
-            fill={YELLOW}
-            stroke={YELLOW_DEEP}
-            strokeWidth={2.5}
-            strokeLinejoin="round"
-          />
-          <line x1={100} y1={10} x2={100} y2={17} stroke={YELLOW_DEEP} strokeWidth={4} strokeLinecap="round" />
-        </g>
-      )}
     </svg>
   );
 }
