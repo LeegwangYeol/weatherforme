@@ -95,19 +95,21 @@ export function ultraSrtNcstBase(offsetHours = 0): { baseDate: string; baseTime:
 // API 호출
 // ---------------------------------------------------------------------------
 function kmaAuth(): { base: string; authParam: string } | null {
-  const hubKey = process.env.KMA_APIHUB_KEY;
-  if (hubKey) {
-    return {
-      base: APIHUB_BASE,
-      authParam: `authKey=${encodeURIComponent(hubKey)}`,
-    };
-  }
+  // 단기예보는 공공데이터포털 키 우선 (검증된 경로), API허브 키는 폴백
+  // — API허브 키는 주로 레이더 등 다른 자료용 (lib/radar.ts)
   const dataKey = process.env.KMA_SERVICE_KEY;
   if (dataKey) {
     // 데이터포털 키는 인코딩/디코딩 두 형태로 제공됨 — '%'가 있으면 이미 인코딩된 키
     return {
       base: DATA_GO_KR_BASE,
       authParam: `serviceKey=${dataKey.includes("%") ? dataKey : encodeURIComponent(dataKey)}`,
+    };
+  }
+  const hubKey = process.env.KMA_APIHUB_KEY;
+  if (hubKey) {
+    return {
+      base: APIHUB_BASE,
+      authParam: `authKey=${encodeURIComponent(hubKey)}`,
     };
   }
   return null;

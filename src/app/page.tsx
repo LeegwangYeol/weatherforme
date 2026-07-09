@@ -32,6 +32,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import WeatherBunny, { type BunnyKind } from "@/components/WeatherBunny";
+import CloudMap from "@/components/CloudMap";
 
 // ---------------------------------------------------------------------------
 // 타입 (API 응답과 동일한 형태)
@@ -243,6 +244,7 @@ export default function Home() {
   );
 
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [showCloudMap, setShowCloudMap] = useState(false);
 
   const showBanner = (kind: "ok" | "err", text: string) => {
     setBanner({ kind, text });
@@ -661,6 +663,14 @@ export default function Home() {
                 })}
               </div>
 
+              {/* 비구름 지도 열기 */}
+              <button
+                onClick={() => setShowCloudMap(true)}
+                className="w-full mt-4 py-3 bg-white/80 hover:bg-white text-[#5b8def] rounded-full font-bold text-sm shadow-sm transition active:scale-[0.98]"
+              >
+                비구름 지도 보기 🌧️
+              </button>
+
               <p className="text-[11px] text-[#9aa7c0] mt-3 text-right font-medium">
                 {new Date(data.updatedAt).toLocaleTimeString("ko-KR", {
                   hour: "2-digit",
@@ -815,6 +825,16 @@ export default function Home() {
           위치 정보는 알림 용도로만 사용됩니다
         </p>
       </div>
+
+      {/* 비구름 지도 모달 */}
+      {showCloudMap && location && (
+        <CloudMap
+          lat={location.lat}
+          lng={location.lng}
+          place={data?.place ?? null}
+          onClose={() => setShowCloudMap(false)}
+        />
+      )}
     </main>
   );
 }
