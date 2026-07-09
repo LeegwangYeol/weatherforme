@@ -1,45 +1,85 @@
 import { NextResponse } from "next/server";
-import { saveUser, removeUser } from "@/lib/db";
-import webpush from "web-push";
-
-// VAPID 키 설정 (푸시 알림용)
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || "mailto:test@example.com",
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string,
-  process.env.VAPID_PRIVATE_KEY as string
-);
+import { getUsers, saveUser, removeUser, subscriptionId } from "@/lib/db";
+import { latLngToGrid } from "@/lib/kma";
+import { getWebPush } from "@/lib/push";
 
 export async function POST(req: Request) {
   try {
     const { subscription, location } = await req.json();
 
-    if (!subscription || !location) {
+    if (
+      !subscription?.endpoint ||
+      !subscription?.keys?.p256dh ||
+      !Number.isFinite(location?.lat) ||
+      !Number.isFinite(location?.lng)
+    ) {
       return NextResponse.json({ error: "Missing data" }, { status: 400 });
     }
 
-    // 간단한 ID 생성 (실제로는 로그인된 유저 ID 등을 사용해야 함)
-    // 여기서는 구독 정보의 endpoint를 해시하거나 간단히 사용합니다.
-    const id = Buffer.from(subscription.endpoint).toString('base64').substring(0, 20);
+    const id = subscriptionId(subscription.endpoint);
 
     await saveUser({
       id,
       subscription,
       location,
+      grid: latLngToGrid(location.lat, location.lng),
+      createdAt: Date.now(),
     });
 
-    // 환영 푸시 알림 전송 (테스트용)
-    await webpush.sendNotification(
-      subscription,
-      JSON.stringify({
-        title: "알림 설정 완료!",
-        body: "이제 비가 오기 전에 미리 알려드릴게요 🌧️",
-      })
-    ).catch(e => console.error("Push Error:", e));
+    // 구독 파이프라인 확인용 환영 푸시 (실패해도 구독 자체는 유지)
+    await getWebPush()
+      .sendNotification(
+        subscription,
+        JSON.stringify({
+          title: "알림 설정 완료! ☔",
+          body: "이제 비가 오기 1~2시간 전에 미리 알려드릴게요.",
+        })
+      )
+      .catch((e) => console.error("Welcome push error:", e));
 
     return NextResponse.json({ success: true, id });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Subscription error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
+
+// 이동시 위치만 조용히 갱신 (환영 푸시 없음) — 클라이언트가 2km 이상 이동을
+// 감지하면 호출한다
+export async function PATCH(req: Request) {
+  try {
+    const { endpoint, location } = await req.json();
+
+    if (
+      !endpoint ||
+      !Number.isFinite(location?.lat) ||
+      !Number.isFinite(location?.lng)
+    ) {
+      return NextResponse.json({ error: "Missing data" }, { status: 400 });
+    }
+
+    const id = subscriptionId(endpoint);
+    const user = (await getUsers()).find((u) => u.id === id);
+    if (!user) {
+      return NextResponse.json({ error: "NOT_SUBSCRIBED" }, { status: 404 });
+    }
+
+    await saveUser({
+      ...user,
+      location,
+      grid: latLngToGrid(location.lat, location.lng),
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Location update error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }
 
@@ -49,11 +89,13 @@ export async function DELETE(req: Request) {
     if (!endpoint) {
       return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
     }
-    const id = Buffer.from(endpoint).toString('base64').substring(0, 20);
-    await removeUser(id);
+    await removeUser(subscriptionId(endpoint));
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Unsubscribe error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }

@@ -1,70 +1,133 @@
 import { NextResponse } from "next/server";
-import { getUsers, removeUser } from "@/lib/db";
-import webpush from "web-push";
+import {
+  getUsers,
+  removeUser,
+  wasNotifiedRecently,
+  markNotified,
+  isPersistent,
+  type UserRecord,
+} from "@/lib/db";
+import {
+  getUltraSrtFcst,
+  findPrecip,
+  formatKoreanHour,
+  isKmaConfigured,
+  type PrecipEvent,
+} from "@/lib/kma";
+import { getWebPush } from "@/lib/push";
 
-// VAPID 키 설정
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || "mailto:test@example.com",
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string,
-  process.env.VAPID_PRIVATE_KEY as string
-);
+// 주기적으로(기본 10분 간격, GitHub Actions) 호출되는 강수 감시 엔드포인트.
+// 구독자를 기상청 격자 단위로 묶어 격자당 한 번만 예보를 조회한다.
 
-const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
+function buildMessage(event: PrecipEvent): { title: string; body: string } {
+  const when = formatKoreanHour(event.time);
+  switch (event.kind) {
+    case "snow":
+      return {
+        title: "❄️ 곧 눈이 와요",
+        body: `${when}부터 눈 예보가 있어요. 따뜻하게 챙겨 입으세요!`,
+      };
+    case "sleet":
+      return {
+        title: "🌨️ 진눈깨비 소식",
+        body: `${when}부터 비/눈 예보가 있어요. 우산 꼭 챙기세요!`,
+      };
+    default:
+      return {
+        title: "☔ 곧 비가 와요",
+        body: `${when}부터 비 예보가 있어요. 나가기 전에 우산 챙기세요!`,
+      };
+  }
+}
 
 export async function GET(req: Request) {
-  // 인증 체크 (Vercel Cron은 Header에 Authorization 토큰을 담아서 보냅니다)
+  // CRON_SECRET이 설정된 경우에만 인증 강제 (GitHub Actions / Vercel Cron 공용)
   const authHeader = req.headers.get("authorization");
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!isKmaConfigured()) {
+    return NextResponse.json({
+      success: true,
+      skipped: "KMA_KEY_MISSING",
+      notificationsSent: 0,
+    });
+  }
+
+  const lookaheadHours = Number(process.env.RAIN_LOOKAHEAD_HOURS) || 2;
+
   try {
     const users = await getUsers();
-    let notificationsSent = 0;
+    if (users.length === 0) {
+      return NextResponse.json({ success: true, users: 0, notificationsSent: 0 });
+    }
 
+    // 같은 격자의 사용자는 예보를 공유 → API 호출 최소화
+    const byGrid = new Map<string, UserRecord[]>();
     for (const user of users) {
-      let willRain = false;
+      const key = `${user.grid.nx},${user.grid.ny}`;
+      const group = byGrid.get(key);
+      if (group) group.push(user);
+      else byGrid.set(key, [user]);
+    }
 
-      if (OPENWEATHER_API_KEY && OPENWEATHER_API_KEY !== "YOUR_OPENWEATHER_API_KEY") {
-        // 실제 날씨 API 연동 (One Call API 3.0 또는 Forecast API)
-        const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${user.location.lat}&lon=${user.location.lng}&appid=${OPENWEATHER_API_KEY}&cnt=2`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const data = await res.json();
-          // 향후 3~6시간 내에 비가 오는지 확인 (간단한 로직)
-          willRain = data.list.some((item: any) => 
-            item.weather.some((w: any) => w.main === "Rain" || w.main === "Drizzle" || w.main === "Thunderstorm")
-          );
-        }
-      } else {
-        // 키가 없으면 로컬 테스트용으로 무조건 비가 온다고 가정 (또는 랜덤)
-        willRain = Math.random() > 0.5; // 50% 확률로 비가 옴
+    const webpush = getWebPush();
+    let notificationsSent = 0;
+    let gridErrors = 0;
+
+    for (const [, group] of byGrid) {
+      let event: PrecipEvent | null;
+      try {
+        const hourly = await getUltraSrtFcst(group[0].grid);
+        event = findPrecip(hourly, lookaheadHours);
+      } catch (error) {
+        gridErrors++;
+        console.error(
+          `Forecast error for grid (${group[0].grid.nx},${group[0].grid.ny}):`,
+          error
+        );
+        continue;
       }
+      if (!event) continue;
 
-      if (willRain) {
+      const message = buildMessage(event);
+
+      for (const user of group) {
+        if (await wasNotifiedRecently(user.id)) continue;
+
         try {
           await webpush.sendNotification(
             user.subscription,
-            JSON.stringify({
-              title: "🌧️ 비 소식 알림",
-              body: "1~2시간 이내에 계신 곳에 비가 올 예정입니다. 우산을 챙기세요!",
-            })
+            JSON.stringify(message)
           );
+          await markNotified(user.id);
           notificationsSent++;
-        } catch (error: any) {
-          if (error.statusCode === 410 || error.statusCode === 404) {
-            // 구독이 취소되었거나 유효하지 않은 경우 삭제
+        } catch (error) {
+          const statusCode = (error as { statusCode?: number }).statusCode;
+          if (statusCode === 410 || statusCode === 404) {
+            // 구독이 만료/해지된 경우 정리
             await removeUser(user.id);
           } else {
-            console.error("Failed to send push to user", user.id, error);
+            console.error("Push send error for user", user.id, error);
           }
         }
       }
     }
 
-    return NextResponse.json({ success: true, notificationsSent });
-  } catch (error: any) {
-    console.error("Cron Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      users: users.length,
+      grids: byGrid.size,
+      gridErrors,
+      notificationsSent,
+      persistentStore: isPersistent,
+    });
+  } catch (error) {
+    console.error("Cron error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }
