@@ -18,3 +18,40 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* 지표 칩 포인트 애니메이션 — 습도(통통), 바람(살랑), 강수량(흔들) */
+@keyframes metric-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+@keyframes metric-sway {
+  0%, 100% { transform: translateX(-1.5px); }
+  50% { transform: translateX(1.5px); }
+}
+@keyframes metric-wiggle {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
+}
+@keyframes metric-shimmer {
+  to { background-position: -200% center; }
+}
+.metric-bob { animation: metric-bob 2s ease-in-out infinite; }
+.metric-sway { animation: metric-sway 1.7s ease-in-out infinite; }
+.metric-wiggle { animation: metric-wiggle 2.4s ease-in-out infinite; }
+.metric-shimmer {
+  background: linear-gradient(90deg, #3d3652 35%, #5b8def 50%, #3d3652 65%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: metric-shimmer 2.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .metric-bob, .metric-sway, .metric-wiggle, .metric-shimmer {
+    animation: none;
+  }
+  .metric-shimmer {
+    background: none;
+    color: inherit;
+  }
+}

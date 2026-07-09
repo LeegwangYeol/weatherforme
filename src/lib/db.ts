@@ -45,9 +45,11 @@ export function subscriptionId(endpoint: string): string {
 const g = globalThis as unknown as {
   __wfmUsers?: UserRecord[];
   __wfmNotified?: Map<string, number>;
+  __wfmCache?: Map<string, { value: unknown; expiresAt: number }>;
 };
 g.__wfmUsers ??= [];
 g.__wfmNotified ??= new Map();
+g.__wfmCache ??= new Map();
 
 export const isPersistent = Boolean(redis);
 
@@ -81,6 +83,26 @@ export const removeUser = async (id: string) => {
   const users = (await getUsers()).filter((u) => u.id !== id);
   await redis.set(USERS_KEY, users);
 };
+
+// ---------------------------------------------------------------------------
+// 범용 TTL 캐시 (역지오코딩 결과 등)
+// ---------------------------------------------------------------------------
+export async function cacheGet<T>(key: string): Promise<T | null> {
+  if (!redis) {
+    const entry = g.__wfmCache!.get(key);
+    if (!entry || entry.expiresAt < Date.now()) return null;
+    return entry.value as T;
+  }
+  return await redis.get<T>(key);
+}
+
+export async function cacheSet(key: string, value: unknown, ttlSeconds: number) {
+  if (!redis) {
+    g.__wfmCache!.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+    return;
+  }
+  await redis.set(key, value, { ex: ttlSeconds });
+}
 
 // ---------------------------------------------------------------------------
 // 알림 중복 방지 — 알림 발송 후 쿨다운 동안 같은 사용자에게 재발송하지 않음

@@ -6,6 +6,7 @@ import {
   findPrecip,
   isKmaConfigured,
 } from "@/lib/kma";
+import { reverseGeocode } from "@/lib/geocode";
 
 // UI에서 현재 날씨 + 6시간 예보를 조회하는 엔드포인트
 export async function GET(req: Request) {
@@ -27,13 +28,15 @@ export async function GET(req: Request) {
   const grid = latLngToGrid(lat, lng);
 
   try {
-    const [current, hourly] = await Promise.all([
+    const [current, hourly, place] = await Promise.all([
       getUltraSrtNcst(grid),
       getUltraSrtFcst(grid),
+      reverseGeocode(lat, lng), // 실패시 null (비필수)
     ]);
 
     return NextResponse.json({
       grid,
+      place,
       current,
       hourly,
       precip: findPrecip(hourly), // 6시간 내 첫 강수 시점 (없으면 null)

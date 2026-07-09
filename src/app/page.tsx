@@ -48,6 +48,7 @@ interface HourlyForecast {
 
 interface WeatherData {
   grid: { nx: number; ny: number };
+  place: string | null;
   current: {
     pty: number;
     temp: number | null;
@@ -585,8 +586,11 @@ export default function Home() {
           {data && condition && (
             <div className="relative">
               <p className="text-xs text-[#8a97b3] font-medium flex items-center gap-1">
-                <MapPin size={12} />
-                현재 위치 · 기상청 실황
+                <MapPin size={12} className="text-[#f487a8]" />
+                <span className="font-bold text-[#6b7694]">
+                  {data.place ?? "현재 위치"}
+                </span>
+                · 기상청 실황
               </p>
 
               {/* 말풍선 */}
@@ -609,20 +613,29 @@ export default function Home() {
               {/* 지표 칩 */}
               <div className="flex gap-2 mt-3 flex-wrap text-xs font-semibold text-[#5a6b8c]">
                 <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
-                  <Droplets size={13} className="text-[#5b8def]" />
-                  습도 {data.current.humidity !== null ? `${data.current.humidity}%` : "--"}
+                  <Droplets size={13} className="text-[#5b8def] metric-bob" />
+                  습도{" "}
+                  <b className="metric-shimmer">
+                    {data.current.humidity !== null ? `${data.current.humidity}%` : "--"}
+                  </b>
                 </span>
                 <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
-                  <Wind size={13} className="text-[#5eb8b0]" />
-                  바람 {data.current.windSpeed !== null ? `${data.current.windSpeed}m/s` : "--"}
+                  <Wind size={13} className="text-[#5eb8b0] metric-sway" />
+                  바람{" "}
+                  <b className="metric-shimmer">
+                    {data.current.windSpeed !== null ? `${data.current.windSpeed}m/s` : "--"}
+                  </b>
                 </span>
                 {data.current.pty > 0 && (
                   <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
-                    <Umbrella size={13} className="text-[#5b8def]" />
-                    {/* 실황 강수량은 숫자만 옴 → 단위 보정 */}
-                    {/^[\d.]+$/.test(data.current.rn1)
-                      ? `${data.current.rn1}mm`
-                      : data.current.rn1}
+                    <Umbrella size={13} className="text-[#5b8def] metric-wiggle" />
+                    시간당{" "}
+                    <b className="metric-shimmer">
+                      {/* 실황 강수량은 숫자만 옴 → 단위 보정 */}
+                      {/^[\d.]+$/.test(data.current.rn1)
+                        ? `${data.current.rn1}mm`
+                        : data.current.rn1}
+                    </b>
                   </span>
                 )}
               </div>
