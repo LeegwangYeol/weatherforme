@@ -21,6 +21,18 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "WeatherForMe",
   },
+  openGraph: {
+    title: "WeatherForMe",
+    description: "비 오기 전에 미리 알려주는 내 위치 기반 우산 알리미",
+    images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "WeatherForMe" }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "WeatherForMe",
+    description: "비 오기 전에 미리 알려주는 내 위치 기반 우산 알리미",
+    images: ["/og-image.jpg"],
+  },
 };
 
 export const viewport: Viewport = {
