@@ -450,6 +450,39 @@ export default function Home() {
     }
   };
 
+  // 수신 경로 즉석 점검 — 서버가 이 기기로 테스트 푸시를 쏨
+  const sendTestPush = async () => {
+    setIsSubscribing(true);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) throw new Error("no subscription");
+
+      const res = await fetch("/api/test-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+      });
+      if (res.ok) {
+        showBanner("ok", "테스트 알림을 보냈어요! 2~3초 안에 떠야 정상이에요.");
+      } else if (res.status === 404 || res.status === 410) {
+        showBanner(
+          "err",
+          "서버에 이 기기 등록이 없어요. 알림을 껐다가 다시 켜주세요!"
+        );
+        setIsSubscribed(false);
+        await subscription.unsubscribe().catch(() => {});
+      } else {
+        showBanner("err", "테스트 발송에 실패했어요. 잠시 후 다시 시도해주세요.");
+      }
+    } catch (error) {
+      console.error("Test push failed:", error);
+      showBanner("err", "테스트 발송에 실패했어요. 알림을 껐다 다시 켜보세요.");
+    } finally {
+      setIsSubscribing(false);
+    }
+  };
+
   const unsubscribeFromPush = async () => {
     setIsSubscribing(true);
     try {
@@ -747,13 +780,22 @@ export default function Home() {
             !iosTooOld &&
             !iosNeedsInstall &&
             (isSubscribed ? (
-              <button
-                onClick={unsubscribeFromPush}
-                disabled={isSubscribing}
-                className="w-full py-3.5 bg-[#ffe9ec] hover:bg-[#ffdde2] text-[#e2647c] rounded-full font-bold transition active:scale-[0.98]"
-              >
-                {isSubscribing ? "해제 중..." : "알림 끄기"}
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={sendTestPush}
+                  disabled={isSubscribing}
+                  className="w-full py-3 bg-white/80 hover:bg-white text-[#5b8def] rounded-full font-bold text-sm shadow-sm transition active:scale-[0.98]"
+                >
+                  {isSubscribing ? "처리 중..." : "테스트 알림 보내기 ✈️"}
+                </button>
+                <button
+                  onClick={unsubscribeFromPush}
+                  disabled={isSubscribing}
+                  className="w-full py-3 bg-[#ffe9ec] hover:bg-[#ffdde2] text-[#e2647c] rounded-full font-bold text-sm transition active:scale-[0.98]"
+                >
+                  알림 끄기
+                </button>
+              </div>
             ) : (
               <button
                 onClick={subscribeToPush}
