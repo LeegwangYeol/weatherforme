@@ -4,6 +4,7 @@ import {
   subscriptionId,
   isPersistent,
   wasNotifiedRecently,
+  cacheGet,
 } from "@/lib/db";
 import { isKmaConfigured } from "@/lib/kma";
 import { isApihubConfigured } from "@/lib/vsrt";
@@ -17,6 +18,8 @@ export async function POST(req: Request) {
       persistentStore: isPersistent,
       kmaConfigured: isKmaConfigured(),
       apihubConfigured: isApihubConfigured(),
+      // 마지막 정기 체크(크론 실행) 시각 — 스케줄러 생존 확인용
+      lastCronAt: (await cacheGet<number>("wfm:lastCron")) ?? null,
     };
 
     if (!endpoint) {

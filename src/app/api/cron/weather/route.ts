@@ -5,6 +5,7 @@ import {
   wasNotifiedRecently,
   markNotified,
   isPersistent,
+  cacheSet,
   type UserRecord,
 } from "@/lib/db";
 import {
@@ -40,12 +41,20 @@ function buildMessage(event: PrecipEvent): { title: string; body: string } {
   }
 }
 
-export async function GET(req: Request) {
-  // CRON_SECRET이 설정된 경우에만 인증 강제 (GitHub Actions / Vercel Cron 공용)
+async function handleCron(req: Request) {
+  // CRON_SECRET 인증 — Bearer 헤더 또는 ?key= 쿼리 (QStash/cron-job.org 등 스케줄러 공용)
+  const { searchParams } = new URL(req.url);
   const authHeader = req.headers.get("authorization");
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const authorized =
+    !process.env.CRON_SECRET ||
+    authHeader === `Bearer ${process.env.CRON_SECRET}` ||
+    searchParams.get("key") === process.env.CRON_SECRET;
+  if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // 스케줄러 생존 확인용 — 상태 점검 카드에서 "마지막 서버 체크 시각"으로 표시
+  await cacheSet("wfm:lastCron", Date.now(), 60 * 60 * 24 * 7).catch(() => {});
 
   if (!isKmaConfigured()) {
     return NextResponse.json({
@@ -55,7 +64,8 @@ export async function GET(req: Request) {
     });
   }
 
-  const lookaheadHours = Number(process.env.RAIN_LOOKAHEAD_HOURS) || 2;
+  // 스케줄러 지연으로 이벤트를 놓치지 않도록 기본 리드타임 3시간
+  const lookaheadHours = Number(process.env.RAIN_LOOKAHEAD_HOURS) || 3;
 
   try {
     const users = await getUsers();
@@ -131,3 +141,6 @@ export async function GET(req: Request) {
     );
   }
 }
+
+// GET/POST 모두 지원 — QStash 등 POST 기본 스케줄러 호환
+export { handleCron as GET, handleCron as POST };

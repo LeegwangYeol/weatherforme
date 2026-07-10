@@ -8,7 +8,9 @@ name: weather-cron
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # 명목상 5분 — GitHub 무료 스케줄러는 크게 지연/생략될 수 있어
+    # 신뢰 가능한 주기는 QStash/cron-job.org 등 외부 스케줄러 병행 권장 (README)
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:

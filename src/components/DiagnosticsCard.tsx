@@ -176,6 +176,32 @@ export default function DiagnosticsCard({
             ? { label: "API허브 키(비구름 지도)", level: "ok" }
             : { label: "API허브 키(비구름 지도)", level: "warn", hint: "KMA_APIHUB_KEY 미설정." }
         );
+        // 스케줄러 생존 확인 — 마지막 정기 체크가 언제였는지
+        const lastCronAt: number | null = json.server.lastCronAt ?? null;
+        const minutesAgo = lastCronAt
+          ? Math.round((Date.now() - lastCronAt) / 60000)
+          : null;
+        out.push(
+          minutesAgo === null
+            ? {
+                label: "서버 정기 체크(크론)",
+                level: "warn",
+                hint: "아직 기록이 없어요. 잠시 후 다시 점검해보세요.",
+              }
+            : minutesAgo <= 20
+              ? { label: "서버 정기 체크(크론)", level: "ok", hint: `${minutesAgo}분 전에 하늘을 확인했어요.` }
+              : minutesAgo <= 75
+                ? {
+                    label: "서버 정기 체크(크론)",
+                    level: "warn",
+                    hint: `마지막 체크가 ${minutesAgo}분 전 — 스케줄러가 지연되고 있어요.`,
+                  }
+                : {
+                    label: "서버 정기 체크(크론)",
+                    level: "fail",
+                    hint: `마지막 체크가 ${Math.round(minutesAgo / 60)}시간 전 — 스케줄러가 멈춘 것 같아요.`,
+                  }
+        );
         if (subscription) {
           if (json.device?.registered) {
             out.push({
