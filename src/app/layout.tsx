@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://weatherforme.vercel.app"),
   title: "WeatherForMe",
   description: "비 오기 전에 미리 알려주는 내 위치 기반 우산 알리미",
   manifest: "/manifest.json",
