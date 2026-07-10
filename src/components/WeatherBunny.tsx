@@ -8,7 +8,9 @@ const OUTLINE = "#4a3f55";
 const PINK_INNER = "#ffd3df";
 const BLUSH = "#ffc2d1";
 const NOSE = "#f49ab1";
-const BODY = "#f6f0fa";
+// 흰 카드 위에서도 형태가 보이도록 몸통은 살짝 진하게 + 연보라 테두리
+const BODY = "#ede2f7";
+const SOFT_EDGE = "#ddcfee";
 const WHISKER = "#d8cce2";
 const YELLOW = "#ffd166";
 const YELLOW_DEEP = "#eab54a";
@@ -218,7 +220,7 @@ export default function WeatherBunny({
       <g className={outerMotion}>
         <g className={innerMotion || undefined}>
           {/* 몸통 + 앞발 */}
-          <ellipse cx={100} cy={163} rx={40} ry={27} fill={BODY} />
+          <ellipse cx={100} cy={163} rx={40} ry={27} fill={BODY} stroke={SOFT_EDGE} strokeWidth={2} />
           <ellipse
             className={kind === "rain" ? "wfb-tap" : undefined}
             cx={82}
@@ -226,15 +228,19 @@ export default function WeatherBunny({
             rx={11}
             ry={7.5}
             fill="#fff"
+            stroke={SOFT_EDGE}
+            strokeWidth={1.5}
           />
-          {kind !== "idle" && <ellipse cx={118} cy={184} rx={11} ry={7.5} fill="#fff" />}
+          {kind !== "idle" && (
+            <ellipse cx={118} cy={184} rx={11} ry={7.5} fill="#fff" stroke={SOFT_EDGE} strokeWidth={1.5} />
+          )}
 
           {/* 머리 그룹 — 흐림이면 갸웃갸웃 */}
           <g className={kind === "cloud" ? "wfb-tilt" : undefined}>
             {/* 귀 — 왼쪽은 쫑긋, 오른쪽은 살짝 기울어서 장난스럽게 */}
-            <ellipse cx={74} cy={46} rx={14} ry={34} fill="#fff" transform="rotate(-8 74 46)" />
+            <ellipse cx={74} cy={46} rx={14} ry={34} fill="#fff" stroke={SOFT_EDGE} strokeWidth={2} transform="rotate(-8 74 46)" />
             <ellipse cx={74} cy={50} rx={6.5} ry={21} fill={PINK_INNER} transform="rotate(-8 74 50)" />
-            <ellipse cx={126} cy={48} rx={14} ry={31} fill="#fff" transform="rotate(17 126 48)" />
+            <ellipse cx={126} cy={48} rx={14} ry={31} fill="#fff" stroke={SOFT_EDGE} strokeWidth={2} transform="rotate(17 126 48)" />
             <ellipse cx={126} cy={52} rx={6.5} ry={19} fill={PINK_INNER} transform="rotate(17 126 52)" />
 
             {/* 우산 (비): 캐노피가 귀를 살짝 덮게, 통째로 살랑살랑 */}
@@ -253,7 +259,7 @@ export default function WeatherBunny({
             )}
 
             {/* 머리 — 옆으로 통통한 아기 비율 */}
-            <ellipse cx={100} cy={108} rx={58} ry={52} fill="#fff" />
+            <ellipse cx={100} cy={108} rx={58} ry={52} fill="#fff" stroke={SOFT_EDGE} strokeWidth={2} />
 
             {/* 수염 점 */}
             <g fill={WHISKER}>
@@ -292,6 +298,8 @@ export default function WeatherBunny({
               rx={8.5}
               ry={13}
               fill="#fff"
+              stroke={SOFT_EDGE}
+              strokeWidth={1.5}
               transform="rotate(-18 147 143)"
             />
           )}
