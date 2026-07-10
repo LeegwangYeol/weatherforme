@@ -20,22 +20,23 @@ import { getWebPush } from "@/lib/push";
 // 주기적으로(기본 10분 간격, GitHub Actions) 호출되는 강수 감시 엔드포인트.
 // 구독자를 기상청 격자 단위로 묶어 격자당 한 번만 예보를 조회한다.
 
-function buildMessage(event: PrecipEvent): { title: string; body: string } {
+function buildMessage(event: PrecipEvent, locationName?: string): { title: string; body: string } {
   const when = formatKoreanHour(event.time);
+  const prefix = locationName && locationName !== "현재 위치" ? `[${locationName}] ` : "";
   switch (event.kind) {
     case "snow":
       return {
-        title: "❄️ 곧 눈이 와요",
+        title: `❄️ ${prefix}곧 눈이 와요`,
         body: `${when}부터 눈 예보가 있어요. 따뜻하게 챙겨 입으세요!`,
       };
     case "sleet":
       return {
-        title: "🌨️ 진눈깨비 소식",
+        title: `🌨️ ${prefix}진눈깨비 소식`,
         body: `${when}부터 비/눈 예보가 있어요. 우산 꼭 챙기세요!`,
       };
     default:
       return {
-        title: "☔ 곧 비가 와요",
+        title: `☔ ${prefix}곧 비가 와요`,
         body: `${when}부터 비 예보가 있어요. 나가기 전에 우산 챙기세요!`,
       };
   }
@@ -74,44 +75,66 @@ async function handleCron(req: Request) {
     }
 
     // 같은 격자의 사용자는 예보를 공유 → API 호출 최소화
-    const byGrid = new Map<string, UserRecord[]>();
+    interface GridTarget {
+      user: UserRecord;
+      locationName: string;
+      grid: { nx: number; ny: number };
+    }
+    const byGrid = new Map<string, GridTarget[]>();
     for (const user of users) {
-      const key = `${user.grid.nx},${user.grid.ny}`;
-      const group = byGrid.get(key);
-      if (group) group.push(user);
-      else byGrid.set(key, [user]);
+      // 1. 현재 위치 추가
+      const currentKey = `${user.grid.nx},${user.grid.ny}`;
+      if (!byGrid.has(currentKey)) byGrid.set(currentKey, []);
+      byGrid.get(currentKey)!.push({ user, locationName: "현재 위치", grid: user.grid });
+
+      // 2. 관심 지역 추가
+      if (user.savedLocations) {
+        for (const loc of user.savedLocations) {
+          const key = `${loc.grid.nx},${loc.grid.ny}`;
+          if (!byGrid.has(key)) byGrid.set(key, []);
+          byGrid.get(key)!.push({ user, locationName: loc.name, grid: loc.grid });
+        }
+      }
     }
 
     const webpush = getWebPush();
     let notificationsSent = 0;
     let gridErrors = 0;
 
-    for (const [, group] of byGrid) {
+    for (const [gridKey, targets] of byGrid) {
       let event: PrecipEvent | null;
       try {
-        const hourly = await getUltraSrtFcst(group[0].grid);
+        const hourly = await getUltraSrtFcst(targets[0].grid);
         event = findPrecip(hourly, lookaheadHours);
       } catch (error) {
         gridErrors++;
-        console.error(
-          `Forecast error for grid (${group[0].grid.nx},${group[0].grid.ny}):`,
-          error
-        );
+        console.error(`Forecast error for grid ${gridKey}:`, error);
         continue;
       }
       if (!event) continue;
 
-      const message = buildMessage(event);
+      // 같은 격자 내에서 여러 관심지역이 겹칠 수 있으므로 유저당 1번만 알림을 보내도록 중복 제거
+      const uniqueTargets = [];
+      const seenUsers = new Set<string>();
+      for (const t of targets) {
+        if (!seenUsers.has(t.user.id)) {
+          seenUsers.add(t.user.id);
+          uniqueTargets.push(t);
+        }
+      }
 
-      for (const user of group) {
-        if (await wasNotifiedRecently(user.id)) continue;
+      for (const target of uniqueTargets) {
+        const { user, locationName } = target;
+        if (await wasNotifiedRecently(user.id, gridKey)) continue;
+
+        const message = buildMessage(event, locationName);
 
         try {
           await webpush.sendNotification(
             user.subscription,
             JSON.stringify(message)
           );
-          await markNotified(user.id);
+          await markNotified(user.id, gridKey);
           notificationsSent++;
         } catch (error) {
           const statusCode = (error as { statusCode?: number }).statusCode;

@@ -19,6 +19,14 @@ export interface SubscriptionData {
   };
 }
 
+export interface SavedLocation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  grid: Grid;
+}
+
 export interface UserRecord {
   id: string;
   subscription: SubscriptionData;
@@ -27,6 +35,7 @@ export interface UserRecord {
     lng: number;
   };
   grid: Grid;
+  savedLocations?: SavedLocation[];
   createdAt: number;
 }
 
@@ -110,18 +119,20 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds: number) 
 const cooldownSeconds = () =>
   (Number(process.env.NOTIFY_COOLDOWN_HOURS) || 3) * 3600;
 
-export const wasNotifiedRecently = async (userId: string): Promise<boolean> => {
+export const wasNotifiedRecently = async (userId: string, gridKey: string): Promise<boolean> => {
+  const cacheKey = `${userId}:${gridKey}`;
   if (!redis) {
-    const expiry = g.__wfmNotified!.get(userId);
+    const expiry = g.__wfmNotified!.get(cacheKey);
     return expiry !== undefined && expiry > Date.now();
   }
-  return (await redis.exists(NOTIFIED_PREFIX + userId)) > 0;
+  return (await redis.exists(NOTIFIED_PREFIX + cacheKey)) > 0;
 };
 
-export const markNotified = async (userId: string) => {
+export const markNotified = async (userId: string, gridKey: string) => {
+  const cacheKey = `${userId}:${gridKey}`;
   if (!redis) {
-    g.__wfmNotified!.set(userId, Date.now() + cooldownSeconds() * 1000);
+    g.__wfmNotified!.set(cacheKey, Date.now() + cooldownSeconds() * 1000);
     return;
   }
-  await redis.set(NOTIFIED_PREFIX + userId, "1", { ex: cooldownSeconds() });
+  await redis.set(NOTIFIED_PREFIX + cacheKey, "1", { ex: cooldownSeconds() });
 };

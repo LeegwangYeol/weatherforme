@@ -3,6 +3,30 @@ import { getUsers, saveUser, removeUser, subscriptionId } from "@/lib/db";
 import { latLngToGrid } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
 
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const endpoint = searchParams.get("endpoint");
+    if (!endpoint) {
+      return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
+    }
+    
+    const id = subscriptionId(endpoint);
+    const user = (await getUsers()).find((u) => u.id === id);
+    if (!user) {
+      return NextResponse.json({ error: "NOT_SUBSCRIBED" }, { status: 404 });
+    }
+    
+    return NextResponse.json({ success: true, savedLocations: user.savedLocations || [] });
+  } catch (error) {
+    console.error("GET subscription error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { subscription, location } = await req.json();
@@ -51,14 +75,10 @@ export async function POST(req: Request) {
 // 감지하면 호출한다
 export async function PATCH(req: Request) {
   try {
-    const { endpoint, location } = await req.json();
+    const { endpoint, location, savedLocations } = await req.json();
 
-    if (
-      !endpoint ||
-      !Number.isFinite(location?.lat) ||
-      !Number.isFinite(location?.lng)
-    ) {
-      return NextResponse.json({ error: "Missing data" }, { status: 400 });
+    if (!endpoint) {
+      return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
     }
 
     const id = subscriptionId(endpoint);
@@ -67,10 +87,21 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "NOT_SUBSCRIBED" }, { status: 404 });
     }
 
+    const updates: Partial<typeof user> = {};
+    if (location && Number.isFinite(location.lat) && Number.isFinite(location.lng)) {
+      updates.location = location;
+      updates.grid = latLngToGrid(location.lat, location.lng);
+    }
+    if (savedLocations !== undefined) {
+      updates.savedLocations = savedLocations.map((loc: { lat: number; lng: number; grid?: { x: number; y: number } }) => ({
+        ...loc,
+        grid: loc.grid || latLngToGrid(loc.lat, loc.lng)
+      }));
+    }
+
     await saveUser({
       ...user,
-      location,
-      grid: latLngToGrid(location.lat, location.lng),
+      ...updates,
     });
 
     return NextResponse.json({ success: true });

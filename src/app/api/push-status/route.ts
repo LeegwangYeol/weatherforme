@@ -38,7 +38,7 @@ export async function POST(req: Request) {
         registered: true,
         grid: user.grid,
         // 쿨다운 중이면 같은 비에 대한 재알림이 잠시 억제됨을 표시
-        cooldownActive: await wasNotifiedRecently(id),
+        cooldownActive: await wasNotifiedRecently(id, "current"),
       },
     });
   } catch (error) {

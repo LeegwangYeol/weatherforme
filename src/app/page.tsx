@@ -30,6 +30,7 @@ import {
   Download,
   TriangleAlert,
   LoaderCircle,
+  X,
 } from "lucide-react";
 import WeatherBunny, { type BunnyKind } from "@/components/WeatherBunny";
 import CloudMap from "@/components/CloudMap";
@@ -64,6 +65,7 @@ interface WeatherData {
 }
 
 type Coords = { lat: number; lng: number };
+type SavedLocation = { id: string; name: string; lat: number; lng: number };
 type WeatherState =
   | { status: "idle" }
   | { status: "ready"; data: WeatherData }
@@ -243,6 +245,9 @@ export default function Home() {
   const [installEvent, setInstallEvent] = useState<{ prompt: () => Promise<unknown> } | null>(
     null
   );
+
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
+  const [isSavingLoc, setIsSavingLoc] = useState(false);
 
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [showCloudMap, setShowCloudMap] = useState(false);
@@ -507,6 +512,88 @@ export default function Home() {
     }
   };
 
+  const loadSavedLocations = useCallback(async () => {
+    if (!isSubscribedRef.current) return;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) return;
+      const res = await fetch(`/api/subscribe?endpoint=${encodeURIComponent(subscription.endpoint)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.savedLocations) {
+          setSavedLocations(data.savedLocations);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSubscribed) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadSavedLocations();
+    }
+  }, [isSubscribed, loadSavedLocations]);
+
+  const addSavedLocation = async () => {
+    if (!location || !data?.place) return;
+    setIsSavingLoc(true);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) throw new Error("no sub");
+      
+      const newLoc: SavedLocation = {
+        id: crypto.randomUUID(),
+        name: data.place,
+        lat: location.lat,
+        lng: location.lng
+      };
+      const newList = [...savedLocations, newLoc];
+      
+      const res = await fetch("/api/subscribe", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint, savedLocations: newList }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      
+      setSavedLocations(newList);
+      showBanner("ok", `${data.place} 지역을 추가했어요!`);
+    } catch {
+      showBanner("err", "관심 지역 저장에 실패했어요.");
+    } finally {
+      setIsSavingLoc(false);
+    }
+  };
+
+  const removeSavedLocation = async (id: string) => {
+    setIsSavingLoc(true);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) throw new Error("no sub");
+      
+      const newList = savedLocations.filter(loc => loc.id !== id);
+      
+      const res = await fetch("/api/subscribe", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint, savedLocations: newList }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      
+      setSavedLocations(newList);
+      showBanner("ok", `관심 지역을 삭제했어요.`);
+    } catch {
+      showBanner("err", "관심 지역 삭제에 실패했어요.");
+    } finally {
+      setIsSavingLoc(false);
+    }
+  };
+
   const pushSupport = swFailed ? "unsupported" : pushEnv;
   // iOS는 홈 화면에 설치된 상태에서만 웹 푸시 지원 (iOS 16.4+)
   const iosNeedsInstall = isIOS && !isStandalone;
@@ -705,6 +792,17 @@ export default function Home() {
                 비구름 지도 보기 🌧️
               </button>
 
+              {/* 관심 지역 추가 버튼 */}
+              {isSubscribed && data.place && !savedLocations.some(l => l.name === data.place) && (
+                <button
+                  onClick={addSavedLocation}
+                  disabled={isSavingLoc}
+                  className="w-full mt-2 py-3 bg-white/50 hover:bg-white text-[#8a97b3] hover:text-[#5b8def] rounded-full font-bold text-sm transition active:scale-[0.98]"
+                >
+                  {isSavingLoc ? "저장 중..." : "관심 지역으로 추가하기 ⭐"}
+                </button>
+              )}
+
               <p className="text-[11px] text-[#9aa7c0] mt-3 text-right font-medium">
                 {new Date(data.updatedAt).toLocaleTimeString("ko-KR", {
                   hour: "2-digit",
@@ -782,6 +880,27 @@ export default function Home() {
             !iosNeedsInstall &&
             (isSubscribed ? (
               <div className="flex flex-col gap-2">
+                {savedLocations.length > 0 && (
+                  <div className="bg-white/60 rounded-2xl p-4 mb-2 shadow-sm border border-white/80">
+                    <h4 className="text-sm font-bold text-[#5a6b8c] mb-3 flex items-center gap-1">
+                      <MapPin size={14} className="text-[#f487a8]" /> 나의 관심 지역
+                    </h4>
+                    <div className="flex flex-col gap-2">
+                      {savedLocations.map(loc => (
+                        <div key={loc.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 shadow-sm border border-black/5">
+                          <span className="text-sm font-bold text-[#3d3652]">{loc.name}</span>
+                          <button
+                            onClick={() => removeSavedLocation(loc.id)}
+                            disabled={isSavingLoc}
+                            className="p-1.5 text-[#9aa7c0] hover:text-[#e2647c] bg-[#f2f6fc] hover:bg-[#ffe9ec] rounded-lg transition"
+                          >
+                            <X size={14} strokeWidth={3} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <button
                   onClick={sendTestPush}
                   disabled={isSubscribing}
