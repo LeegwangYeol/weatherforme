@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import WeatherBunny, { type BunnyKind } from "@/components/WeatherBunny";
 import CloudMap from "@/components/CloudMap";
+import DiagnosticsCard from "@/components/DiagnosticsCard";
 
 // ---------------------------------------------------------------------------
 // 타입 (API 응답과 동일한 형태)
@@ -810,6 +811,18 @@ export default function Home() {
               </button>
             ))}
         </section>
+
+        {/* ------------------------------------------------ 상태 점검 카드 */}
+        <DiagnosticsCard
+          pushEnv={pushEnv}
+          inAppBrowser={inAppBrowser}
+          isIOS={isIOS}
+          iosTooOld={iosTooOld}
+          isStandalone={isStandalone}
+          hasLocation={Boolean(location)}
+          weatherReady={weather.status === "ready"}
+          isSubscribed={isSubscribed}
+        />
 
         {/* ------------------------------------------------ 설치 안내 카드 */}
         {!isStandalone && (
