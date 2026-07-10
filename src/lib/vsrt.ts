@@ -53,7 +53,12 @@ async function fetchGrid(
 
 export interface CloudFrame {
   tmef: string; // "202607092200" (KST)
-  rn1: number[]; // window 안 강수량(mm/h), 바다/영역밖 = -99
+  // window 안 강수 세기(mm/h). 강수형태(PTY)만 있고 양이 0인 미량 강수는 0.4로 표기.
+  // 바다/영역밖 = -99. (알림 판정과 어긋나지 않도록 PTY도 함께 반영)
+  rn1: number[];
+  // window 안 강수형태 코드(0없음 1비 2비/눈 3눈 4소나기 5빗방울 6빗방울눈 7눈날림).
+  // 육지 강수없음=0, 바다/영역밖=-99. 알림(getUltraSrtFcst PTY)과 동일 기준.
+  pty: number[];
 }
 
 export interface CloudMapData {
@@ -84,54 +89,75 @@ export async function getCloudMap(
   const center = latLngToGrid(lat, lng);
   const half = Math.floor(size / 2);
 
-  // 유효한 tmfc 찾기 (+1h 프레임이 존재하는 가장 최근 발표)
+  // 유효한 tmfc 찾기 (+1h RN1 프레임이 존재하는 가장 최근 발표)
   let tmfc: string | null = null;
-  let firstFrame: { tmef: string; grid: number[] } | null = null;
   for (const candidate of tmfcCandidates()) {
-    const tmef = nextHourAfter(candidate, 1);
-    const grid = await fetchGrid(candidate, tmef, "RN1");
+    const grid = await fetchGrid(candidate, nextHourAfter(candidate, 1), "RN1");
     if (grid) {
       tmfc = candidate;
-      firstFrame = { tmef, grid };
       break;
     }
   }
-  if (!tmfc || !firstFrame) return null;
+  if (!tmfc) return null;
 
-  // 나머지 +2h~+6h 병렬 요청
-  const rest = await Promise.all(
-    [2, 3, 4, 5, 6].map(async (h) => {
-      const tmef = nextHourAfter(tmfc!, h);
-      const grid = await fetchGrid(tmfc!, tmef, "RN1");
-      return grid ? { tmef, grid } : null;
-    })
-  );
-
-  const slice = (grid: number[]): number[] => {
-    const out: number[] = new Array(size * size);
+  // 사용자 위치 중심 창으로 잘라내기 — RN1(세기) + PTY(형태) 결합
+  // 화면 위(북쪽)부터 그리기 좋게 북→남 순서로 담는다
+  const sliceWindow = (
+    rn1grid: number[],
+    ptygrid: number[] | null
+  ): { rn1: number[]; pty: number[] } => {
+    const rn1: number[] = new Array(size * size);
+    const pty: number[] = new Array(size * size);
     let i = 0;
-    // 화면 위(북쪽)부터 그리기 좋게 북→남 순서로 담는다
     for (let dy = half; dy >= -half; dy--) {
       for (let dx = -half; dx <= half; dx++) {
         const nx = center.nx + dx;
         const ny = center.ny + dy;
         if (nx < 1 || nx > DFS_NX || ny < 1 || ny > DFS_NY) {
-          out[i++] = -99;
-        } else {
-          const v = grid[(ny - 1) * DFS_NX + (nx - 1)];
-          out[i++] = v < 0 ? -99 : Math.round(v * 10) / 10;
+          rn1[i] = -99;
+          pty[i] = -99;
+          i++;
+          continue;
         }
+        const idx = (ny - 1) * DFS_NX + (nx - 1);
+        const rraw = rn1grid[idx];
+        if (rraw < 0) {
+          // 바다/영역밖
+          rn1[i] = -99;
+          pty[i] = -99;
+          i++;
+          continue;
+        }
+        const praw = ptygrid ? ptygrid[idx] : 0;
+        const ptyv = praw > 0 && praw < 90 ? praw : 0;
+        let mm = rraw > 0 ? rraw : 0;
+        // 형태(PTY)는 있는데 양이 0인 미량 강수(소나기·빗방울 등)도 옅게 보이게
+        if (mm === 0 && ptyv > 0) mm = 0.4;
+        rn1[i] = Math.round(mm * 10) / 10;
+        pty[i] = ptyv;
+        i++;
       }
     }
-    return out;
+    return { rn1, pty };
   };
 
-  const frames: CloudFrame[] = [
-    { tmef: firstFrame.tmef, rn1: slice(firstFrame.grid) },
-    ...rest
-      .filter((f): f is { tmef: string; grid: number[] } => f !== null)
-      .map((f) => ({ tmef: f.tmef, rn1: slice(f.grid) })),
-  ];
+  // +1h~+6h 프레임을 RN1·PTY 함께 조회
+  const frames = (
+    await Promise.all(
+      [1, 2, 3, 4, 5, 6].map(async (h) => {
+        const tmef = nextHourAfter(tmfc!, h);
+        const [rn1grid, ptygrid] = await Promise.all([
+          fetchGrid(tmfc!, tmef, "RN1"),
+          fetchGrid(tmfc!, tmef, "PTY"),
+        ]);
+        if (!rn1grid) return null;
+        const w = sliceWindow(rn1grid, ptygrid);
+        return { tmef, rn1: w.rn1, pty: w.pty };
+      })
+    )
+  ).filter((f): f is CloudFrame => f !== null);
+
+  if (frames.length === 0) return null;
 
   return { tmfc, center, size, cellKm: 5, frames };
 }

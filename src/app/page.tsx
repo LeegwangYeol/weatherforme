@@ -1006,6 +1006,7 @@ export default function Home() {
           lat={location.lat}
           lng={location.lng}
           place={data?.place ?? null}
+          precip={data?.precip ?? null}
           onClose={() => setShowCloudMap(false)}
         />
       )}

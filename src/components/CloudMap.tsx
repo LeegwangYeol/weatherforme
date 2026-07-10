@@ -8,6 +8,7 @@ import { X, Play, Pause, LoaderCircle, TriangleAlert, MapPin } from "lucide-reac
 interface CloudFrame {
   tmef: string;
   rn1: number[];
+  pty: number[];
 }
 
 interface CloudMapData {
@@ -18,6 +19,13 @@ interface CloudMapData {
   frames: CloudFrame[];
 }
 
+interface Precip {
+  date: string;
+  time: string;
+  kind: "rain" | "sleet" | "snow";
+  pty: number;
+}
+
 type MapState =
   | { status: "loading" }
   | { status: "ready"; data: CloudMapData }
@@ -25,9 +33,15 @@ type MapState =
 
 const CELL_PX = 10; // 캔버스 내부 해상도 (CSS로 확대)
 
-// 강수량(mm/h) → 파스텔 색
-function rainColor(mm: number): string | null {
+// 강수 세기(mm/h) + 형태(PTY) → 파스텔 색. 눈은 흰-하늘색, 비는 파랑-보라.
+function cellColor(mm: number, pty: number): string | null {
   if (mm <= 0) return null;
+  const isSnow = pty === 3 || pty === 7;
+  if (isSnow) {
+    if (mm < 1) return "rgba(214, 228, 255, 0.7)";
+    if (mm < 3) return "rgba(180, 205, 250, 0.8)";
+    return "rgba(150, 185, 245, 0.9)";
+  }
   if (mm < 1) return "rgba(154, 196, 248, 0.55)";
   if (mm < 3) return "rgba(112, 165, 240, 0.7)";
   if (mm < 7) return "rgba(74, 126, 230, 0.8)";
@@ -39,15 +53,25 @@ function hourLabel(tmef: string): string {
   return `${Number(tmef.slice(8, 10))}시`;
 }
 
+function formatKoreanHour(time: string): string {
+  const h = Number(time.slice(0, 2));
+  if (h === 0) return "자정";
+  if (h === 12) return "낮 12시";
+  return h < 12 ? `오전 ${h}시` : `오후 ${h - 12}시`;
+}
+
 export default function CloudMap({
   lat,
   lng,
   place,
+  precip,
   onClose,
 }: {
   lat: number;
   lng: number;
   place: string | null;
+  // 알림/날씨카드와 동일한 강수 판정 결과 — 지도 상단 문구를 이걸로 통일
+  precip: Precip | null;
   onClose: () => void;
 }) {
   const [state, setState] = useState<MapState>({ status: "loading" });
@@ -120,7 +144,7 @@ export default function CloudMap({
         ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
         ctx.fillRect(x, y, px, px);
 
-        const color = rainColor(v);
+        const color = cellColor(v, frame.pty[row * size + col]);
         if (color) {
           ctx.fillStyle = color;
           ctx.beginPath();
@@ -143,31 +167,32 @@ export default function CloudMap({
     ctx.fill();
   }, [state, frameIdx]);
 
-  // 내 위치(중앙 3×3) 기준 첫 강수 프레임 → 안내 문구
-  const arrival = useCallback((): string => {
+  // 지도 상단 안내 문구.
+  // 1순위: 알림/날씨카드와 동일한 precip(초단기예보 PTY 판정) → 문구 완전 일치 보장
+  // 2순위(precip 없을 때): 격자의 강수형태(PTY)로 내 위치 3×3에서 도착 추정
+  const headline = useCallback((): string => {
+    if (precip) {
+      const when = formatKoreanHour(precip.time);
+      if (precip.kind === "snow") return `${when}부터 눈이 와요 ❄️`;
+      if (precip.kind === "sleet") return `${when}부터 진눈깨비가 와요 🌨️`;
+      return `${when}부터 비가 와요 ☔`;
+    }
     if (state.status !== "ready") return "";
-    const { size, frames, tmfc } = state.data;
+    const { size, frames } = state.data;
     const half = Math.floor(size / 2);
-    const hasRain = (f: CloudFrame) => {
+    // 형태(PTY)>0 을 강수로 간주 — 알림과 동일 기준 (양이 0인 소나기도 포함)
+    const hasPrecip = (f: CloudFrame) => {
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) {
-          const v = f.rn1[(half + dy) * size + (half + dx)];
-          if (v > 0) return true;
+          if (f.pty[(half + dy) * size + (half + dx)] > 0) return true;
         }
       return false;
     };
-    const idx = frames.findIndex(hasRain);
+    const idx = frames.findIndex(hasPrecip);
     if (idx === -1) return "앞으로 6시간, 내 위치엔 비 소식 없어요 ☀️";
-    // tmfc(분 포함) → 첫 강수 tmef까지 대략적인 시간 차
-    const fcH = Number(tmfc.slice(8, 10)) + Number(tmfc.slice(10, 12)) / 60;
-    const efH = Number(frames[idx].tmef.slice(8, 10));
-    let diff = efH - fcH;
-    if (diff < 0) diff += 24;
-    const rounded = Math.max(1, Math.round(diff));
-    return idx === 0
-      ? "이미 근처에 비구름이 있어요! ☔"
-      : `약 ${rounded}시간 뒤 비구름이 도착할 것 같아요 ☔`;
-  }, [state]);
+    if (idx === 0) return "이미 근처에 비구름이 있어요! ☔";
+    return `약 ${idx}시간 뒤 비구름이 도착할 것 같아요 ☔`;
+  }, [state, precip]);
 
   const data = state.status === "ready" ? state.data : null;
 
@@ -251,9 +276,9 @@ export default function CloudMap({
               </div>
             </div>
 
-            {/* 도착 안내 */}
+            {/* 도착 안내 (알림/날씨카드와 동일 기준) */}
             <p className="mt-3 text-sm font-bold text-[#3d3652] bg-white/75 rounded-2xl px-4 py-3 shadow-sm">
-              {arrival()}
+              {headline()}
             </p>
 
             {/* 범례 */}
