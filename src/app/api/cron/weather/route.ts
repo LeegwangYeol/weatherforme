@@ -6,14 +6,19 @@ import {
   markNotified,
   isPersistent,
   cacheSet,
+  cacheGet,
   type UserRecord,
 } from "@/lib/db";
 import {
   getUltraSrtFcst,
+  getVilageFcst,
   findPrecip,
+  findPrecipInWindow,
   formatKoreanHour,
   isKmaConfigured,
   type PrecipEvent,
+  type HourlyForecast,
+  type Grid,
 } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
 
@@ -148,12 +153,148 @@ async function handleCron(req: Request) {
       }
     }
 
+    // ------------------------------------------------------------------
+    // 출퇴근 브리핑 & 퇴근 리마인더 (Phase 1)
+    // - 아침 브리핑: 단기예보로 출근길+퇴근길 강수를 하루 1회 요약
+    // - 퇴근 리마인더: 퇴근 1시간 전, 초단기예보에 비가 있을 때만
+    // - force=briefing|evening (인증 필수): 시각/요일/중복 무시하고 즉시 발송 (테스트용)
+    // ------------------------------------------------------------------
+    const force = searchParams.get("force");
+    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const kstHour = kst.getUTCHours();
+    const kstDay = kst.getUTCDay();
+    const pad2 = (n: number) => String(n).padStart(2, "0");
+    const ymd = `${kst.getUTCFullYear()}${pad2(kst.getUTCMonth() + 1)}${pad2(kst.getUTCDate())}`;
+
+    let briefingsSent = 0;
+    let remindersSent = 0;
+    let briefErrors = 0;
+
+    // 격자별 예보는 한 실행 내에서 재사용 (집/직장이 같은 격자면 1회 조회)
+    const shortCache = new Map<string, Promise<HourlyForecast[]>>();
+    const cachedShort = (g: Grid) => {
+      const k = `${g.nx},${g.ny}`;
+      if (!shortCache.has(k)) shortCache.set(k, getVilageFcst(g));
+      return shortCache.get(k)!;
+    };
+    const ultraCache = new Map<string, Promise<HourlyForecast[]>>();
+    const cachedUltra = (g: Grid) => {
+      const k = `${g.nx},${g.ny}`;
+      if (!ultraCache.has(k)) ultraCache.set(k, getUltraSrtFcst(g));
+      return ultraCache.get(k)!;
+    };
+
+    const kindKo = (k: "rain" | "sleet" | "snow") =>
+      k === "snow" ? "눈" : k === "sleet" ? "진눈깨비" : "비";
+
+    const trySend = async (
+      user: UserRecord,
+      message: { title: string; body: string }
+    ): Promise<boolean> => {
+      try {
+        await webpush.sendNotification(user.subscription, JSON.stringify(message));
+        return true;
+      } catch (error) {
+        const statusCode = (error as { statusCode?: number }).statusCode;
+        if (statusCode === 410 || statusCode === 404) await removeUser(user.id);
+        else console.error("Push send error for user", user.id, error);
+        return false;
+      }
+    };
+
+    for (const user of users) {
+      const c = user.commute;
+      if (!c?.enabled) continue;
+      const work = user.savedLocations?.find((l) => l.role === "work");
+      if (!work) continue;
+      // 집 미지정시 현재 위치를 집으로 간주
+      const home = user.savedLocations?.find((l) => l.role === "home") ?? {
+        name: "현재 위치",
+        grid: user.grid,
+      };
+
+      const days = c.days?.length ? c.days : [1, 2, 3, 4, 5];
+      if (!force && !days.includes(kstDay)) continue;
+
+      const [mStart, mEnd] = c.morning ?? [7, 9];
+      const [eStart, eEnd] = c.evening ?? [18, 20];
+
+      // (a) 아침 브리핑
+      if (force === "briefing" || kstHour === (c.briefingHour ?? 7)) {
+        const briefKey = `wfm:brief:${user.id}:${ymd}`;
+        if (force === "briefing" || !(await cacheGet(briefKey))) {
+          try {
+            const [homeF, workF] = await Promise.all([
+              cachedShort(home.grid),
+              cachedShort(work.grid),
+            ]);
+            const morning = findPrecipInWindow(homeF, ymd, mStart, mEnd);
+            const evening =
+              findPrecipInWindow(workF, ymd, eStart, eEnd) ??
+              findPrecipInWindow(homeF, ymd, eStart, eEnd);
+
+            if (morning || evening || c.briefingAlways) {
+              const part = (label: string, ev: PrecipEvent | null) =>
+                ev
+                  ? `${label} ${formatKoreanHour(ev.time)} ${kindKo(ev.kind)}${
+                      ev.pop != null ? `(${ev.pop}%)` : ""
+                    }`
+                  : `${label} 비 소식 없음`;
+              const ok = await trySend(user, {
+                title:
+                  morning || evening
+                    ? "☔ 오늘 출퇴근, 우산 챙기세요!"
+                    : "🌤️ 오늘 출퇴근 비 소식 없어요",
+                body: `${part("출근길", morning)} · ${part("퇴근길", evening)}`,
+              });
+              if (ok) briefingsSent++;
+            }
+            // 테스트 강제 발송은 실제 아침 브리핑을 막지 않도록 기록하지 않음
+            if (!force) await cacheSet(briefKey, 1, 26 * 3600);
+          } catch (error) {
+            briefErrors++;
+            console.error("Briefing error for user", user.id, error);
+          }
+        }
+      }
+
+      // (b) 퇴근 1시간 전 리마인더 — 임박 구간이라 초단기예보(더 정확) 사용
+      if (force === "evening" || kstHour === eStart - 1) {
+        const remKey = `wfm:evrem:${user.id}:${ymd}`;
+        if (force === "evening" || !(await cacheGet(remKey))) {
+          try {
+            const [workU, homeU] = await Promise.all([
+              cachedUltra(work.grid),
+              cachedUltra(home.grid),
+            ]);
+            const eve =
+              findPrecipInWindow(workU, ymd, eStart, eEnd) ??
+              findPrecipInWindow(homeU, ymd, eStart, eEnd);
+            if (eve) {
+              const ok = await trySend(user, {
+                title: "☔ 퇴근길 비 예보",
+                body: `${formatKoreanHour(eve.time)}부터 ${kindKo(eve.kind)} 소식이 있어요. 우산 챙겼어요?`,
+              });
+              if (ok) remindersSent++;
+            }
+            if (!force) await cacheSet(remKey, 1, 26 * 3600);
+          } catch (error) {
+            briefErrors++;
+            console.error("Evening reminder error for user", user.id, error);
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       users: users.length,
       grids: byGrid.size,
       gridErrors,
       notificationsSent,
+      briefingsSent,
+      remindersSent,
+      briefErrors,
       persistentStore: isPersistent,
     });
   } catch (error) {

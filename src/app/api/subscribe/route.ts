@@ -1,7 +1,38 @@
 import { NextResponse } from "next/server";
-import { getUsers, saveUser, removeUser, subscriptionId } from "@/lib/db";
+import {
+  getUsers,
+  saveUser,
+  removeUser,
+  subscriptionId,
+  type CommuteConfig,
+} from "@/lib/db";
 import { latLngToGrid } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
+
+// 출퇴근 설정 검증/정규화 — 이상값은 기본값으로
+function sanitizeCommute(raw: unknown): CommuteConfig {
+  const c = (raw ?? {}) as Partial<CommuteConfig>;
+  const hour = (v: unknown, fallback: number) => {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 0 && n <= 23 ? n : fallback;
+  };
+  const pair = (v: unknown, fallback: [number, number]): [number, number] => {
+    if (!Array.isArray(v)) return fallback;
+    const a = hour(v[0], fallback[0]);
+    const b = hour(v[1], fallback[1]);
+    return a <= b ? [a, b] : [b, a];
+  };
+  return {
+    enabled: Boolean(c.enabled),
+    morning: pair(c.morning, [7, 9]),
+    evening: pair(c.evening, [18, 20]),
+    days: Array.isArray(c.days)
+      ? c.days.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+      : [1, 2, 3, 4, 5],
+    briefingHour: hour(c.briefingHour, 7),
+    briefingAlways: Boolean(c.briefingAlways),
+  };
+}
 
 export async function GET(req: Request) {
   try {
@@ -17,7 +48,11 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "NOT_SUBSCRIBED" }, { status: 404 });
     }
     
-    return NextResponse.json({ success: true, savedLocations: user.savedLocations || [] });
+    return NextResponse.json({
+      success: true,
+      savedLocations: user.savedLocations || [],
+      commute: user.commute ?? null,
+    });
   } catch (error) {
     console.error("GET subscription error:", error);
     return NextResponse.json(
@@ -75,7 +110,7 @@ export async function POST(req: Request) {
 // 감지하면 호출한다
 export async function PATCH(req: Request) {
   try {
-    const { endpoint, location, savedLocations } = await req.json();
+    const { endpoint, location, savedLocations, commute } = await req.json();
 
     if (!endpoint) {
       return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
@@ -91,6 +126,9 @@ export async function PATCH(req: Request) {
     if (location && Number.isFinite(location.lat) && Number.isFinite(location.lng)) {
       updates.location = location;
       updates.grid = latLngToGrid(location.lat, location.lng);
+    }
+    if (commute !== undefined && commute !== null) {
+      updates.commute = sanitizeCommute(commute);
     }
     if (savedLocations !== undefined) {
       updates.savedLocations = savedLocations.map((loc: { lat: number; lng: number; grid?: { x: number; y: number } }) => ({

@@ -130,7 +130,7 @@ interface KmaItem {
 const NO_DATA = "NO_DATA";
 
 async function callKma(
-  operation: "getUltraSrtFcst" | "getUltraSrtNcst",
+  operation: "getUltraSrtFcst" | "getUltraSrtNcst" | "getVilageFcst",
   params: Record<string, string>
 ): Promise<KmaItem[]> {
   const auth = kmaAuth();
@@ -180,6 +180,7 @@ export interface HourlyForecast {
   temp: number | null; // 기온(℃)
   rn1: string; // 1시간 강수량 ("강수없음", "1mm 미만", "1.5mm"...)
   lgt: boolean; // 낙뢰 여부
+  pop?: number | null; // 강수확률(%) — 단기예보에만 있음
 }
 
 export async function getUltraSrtFcst(grid: Grid): Promise<HourlyForecast[]> {
@@ -313,6 +314,99 @@ export async function getUltraSrtNcst(grid: Grid): Promise<CurrentConditions> {
 }
 
 // ---------------------------------------------------------------------------
+// 단기예보: 하루 8회(02/05/08/11/14/17/20/23시) 발표, 3일치 시간별 예보
+// 초단기(6시간)를 넘는 시간대(예: 아침에 보는 퇴근길)는 이걸로 커버한다
+// ---------------------------------------------------------------------------
+// 발표 +10분 이후 제공 — 15분 버퍼를 두고 최근 발표분부터 선택
+export function vilageFcstBase(offsetSlots = 0): { baseDate: string; baseTime: string } {
+  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const nowMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const slots = [23, 20, 17, 14, 11, 8, 5, 2];
+
+  const available: { dayOffset: number; hour: number }[] = [];
+  for (const s of slots) {
+    if (nowMin >= s * 60 + 15) available.push({ dayOffset: 0, hour: s });
+  }
+  for (const s of slots) available.push({ dayOffset: -1, hour: s });
+
+  const pick = available[Math.min(offsetSlots, available.length - 1)];
+  const base = new Date(d);
+  base.setUTCDate(base.getUTCDate() + pick.dayOffset);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return {
+    baseDate: `${base.getUTCFullYear()}${p(base.getUTCMonth() + 1)}${p(base.getUTCDate())}`,
+    baseTime: `${p(pick.hour)}00`,
+  };
+}
+
+export async function getVilageFcst(grid: Grid): Promise<HourlyForecast[]> {
+  let items: KmaItem[];
+  try {
+    const base = vilageFcstBase();
+    items = await callKma("getVilageFcst", {
+      numOfRows: "500", // 12카테고리 × ~40시간 — 오늘 저녁까지 넉넉히 커버
+      base_date: base.baseDate,
+      base_time: base.baseTime,
+      nx: String(grid.nx),
+      ny: String(grid.ny),
+    });
+  } catch (e) {
+    // 발표 직후 미제공 구간이면 한 슬롯 전 발표분으로 재시도
+    if (!(e instanceof Error && e.message === NO_DATA)) throw e;
+    const base = vilageFcstBase(1);
+    items = await callKma("getVilageFcst", {
+      numOfRows: "500",
+      base_date: base.baseDate,
+      base_time: base.baseTime,
+      nx: String(grid.nx),
+      ny: String(grid.ny),
+    });
+  }
+
+  const byHour = new Map<string, HourlyForecast>();
+  for (const item of items) {
+    if (!item.fcstDate || !item.fcstTime) continue;
+    const key = `${item.fcstDate}${item.fcstTime}`;
+    let entry = byHour.get(key);
+    if (!entry) {
+      entry = {
+        date: item.fcstDate,
+        time: item.fcstTime,
+        pty: 0,
+        sky: 1,
+        temp: null,
+        rn1: "강수없음",
+        lgt: false,
+        pop: null,
+      };
+      byHour.set(key, entry);
+    }
+    const v = item.fcstValue ?? "";
+    switch (item.category) {
+      case "PTY":
+        entry.pty = Number(v) || 0;
+        break;
+      case "SKY":
+        entry.sky = Number(v) || 1;
+        break;
+      case "TMP":
+        entry.temp = Number.isNaN(Number(v)) ? null : Number(v);
+        break;
+      case "PCP":
+        entry.rn1 = v;
+        break;
+      case "POP":
+        entry.pop = Number.isNaN(Number(v)) ? null : Number(v);
+        break;
+    }
+  }
+
+  return [...byHour.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, entry]) => entry);
+}
+
+// ---------------------------------------------------------------------------
 // 강수 판정
 // ---------------------------------------------------------------------------
 // PTY 코드: 0없음 1비 2비/눈 3눈 4소나기 5빗방울 6빗방울눈날림 7눈날림
@@ -330,6 +424,7 @@ export interface PrecipEvent {
   time: string;
   kind: Exclude<PrecipKind, "none">;
   pty: number;
+  pop?: number | null; // 강수확률(%) — 단기예보 기반일 때만
 }
 
 // 예보 목록에서 withinHours 시간 내 첫 강수 시점을 찾는다 (예보는 1시간 간격)
@@ -342,6 +437,26 @@ export function findPrecip(
     const kind = ptyToKind(h.pty);
     if (kind !== "none") {
       return { date: h.date, time: h.time, kind, pty: h.pty };
+    }
+  }
+  return null;
+}
+
+// 특정 날짜의 시간대 창(startHour~endHour, 양끝 포함)에서 첫 강수를 찾는다
+// — 출퇴근 브리핑용. 모든 판정은 PTY(강수형태) 기준.
+export function findPrecipInWindow(
+  hourly: HourlyForecast[],
+  ymd: string,
+  startHour: number,
+  endHour: number
+): PrecipEvent | null {
+  for (const h of hourly) {
+    if (h.date !== ymd) continue;
+    const hh = Number(h.time.slice(0, 2));
+    if (hh < startHour || hh > endHour) continue;
+    const kind = ptyToKind(h.pty);
+    if (kind !== "none") {
+      return { date: h.date, time: h.time, kind, pty: h.pty, pop: h.pop ?? null };
     }
   }
   return null;

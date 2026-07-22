@@ -65,7 +65,33 @@ interface WeatherData {
 }
 
 type Coords = { lat: number; lng: number };
-type SavedLocation = { id: string; name: string; lat: number; lng: number };
+type SavedLocation = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  grid?: { nx: number; ny: number };
+  role?: "home" | "work";
+};
+
+// 출퇴근 브리핑 설정 (서버 CommuteConfig와 동일)
+type CommuteConfig = {
+  enabled: boolean;
+  morning: [number, number];
+  evening: [number, number];
+  days: number[];
+  briefingHour: number;
+  briefingAlways: boolean;
+};
+
+const DEFAULT_COMMUTE: CommuteConfig = {
+  enabled: false,
+  morning: [7, 9],
+  evening: [18, 20],
+  days: [1, 2, 3, 4, 5],
+  briefingHour: 7,
+  briefingAlways: false,
+};
 type WeatherState =
   | { status: "idle" }
   | { status: "ready"; data: WeatherData }
@@ -248,6 +274,7 @@ export default function Home() {
 
   const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
   const [isSavingLoc, setIsSavingLoc] = useState(false);
+  const [commute, setCommute] = useState<CommuteConfig | null>(null);
 
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [showCloudMap, setShowCloudMap] = useState(false);
@@ -524,6 +551,9 @@ export default function Home() {
         if (data.savedLocations) {
           setSavedLocations(data.savedLocations);
         }
+        if (data.commute !== undefined) {
+          setCommute(data.commute);
+        }
       }
     } catch {
       // ignore
@@ -594,6 +624,55 @@ export default function Home() {
     }
   };
 
+  // 관심 지역에 집/직장 역할 지정 (역할당 1곳, 같은 걸 다시 누르면 해제)
+  const setLocationRole = async (locId: string, role: "home" | "work") => {
+    const prev = savedLocations;
+    const newList = savedLocations.map((l) => {
+      if (l.id === locId) return { ...l, role: l.role === role ? undefined : role };
+      if (l.role === role) return { ...l, role: undefined };
+      return l;
+    });
+    setSavedLocations(newList);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) throw new Error("no sub");
+      const res = await fetch("/api/subscribe", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint, savedLocations: newList }),
+      });
+      if (!res.ok) throw new Error("save failed");
+    } catch {
+      setSavedLocations(prev);
+      showBanner("err", "역할 저장에 실패했어요.");
+    }
+  };
+
+  // 출퇴근 브리핑 설정 저장 (변경 즉시 서버 반영, 실패시 롤백)
+  const updateCommute = async (patch: Partial<CommuteConfig>) => {
+    const prev = commute;
+    const next = { ...(commute ?? DEFAULT_COMMUTE), ...patch };
+    setCommute(next);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) throw new Error("no sub");
+      const res = await fetch("/api/subscribe", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription.endpoint, commute: next }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      if (patch.enabled === true) {
+        showBanner("ok", `출퇴근 브리핑 켜짐! 매일 아침 ${next.briefingHour}시에 알려드려요.`);
+      }
+    } catch {
+      setCommute(prev);
+      showBanner("err", "브리핑 설정 저장에 실패했어요.");
+    }
+  };
+
   const pushSupport = swFailed ? "unsupported" : pushEnv;
   // iOS는 홈 화면에 설치된 상태에서만 웹 푸시 지원 (iOS 16.4+)
   const iosNeedsInstall = isIOS && !isStandalone;
@@ -602,6 +681,9 @@ export default function Home() {
   const condition = data ? conditionOf(data.current.pty, data.hourly[0]?.sky ?? 1) : null;
   const weatherLoading = Boolean(location) && weather.status === "idle";
   const bunnyKind: BunnyKind = condition?.bunny ?? "idle";
+  const homeLoc = savedLocations.find((l) => l.role === "home");
+  const workLoc = savedLocations.find((l) => l.role === "work");
+  const commuteCfg = commute ?? DEFAULT_COMMUTE;
 
   return (
     <main
@@ -887,8 +969,35 @@ export default function Home() {
                     </h4>
                     <div className="flex flex-col gap-2">
                       {savedLocations.map(loc => (
-                        <div key={loc.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 shadow-sm border border-black/5">
-                          <span className="text-sm font-bold text-[#3d3652]">{loc.name}</span>
+                        <div key={loc.id} className="flex items-center justify-between gap-2 bg-white rounded-xl px-3 py-2.5 shadow-sm border border-black/5">
+                          <span className="text-sm font-bold text-[#3d3652] flex-1 truncate">{loc.name}</span>
+                          {/* 출퇴근 역할 지정 — 🏠 집 / 🏢 직장 */}
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setLocationRole(loc.id, "home")}
+                              disabled={isSavingLoc}
+                              aria-label={`${loc.name}을 집으로 지정`}
+                              className={`px-1.5 py-1 rounded-lg text-sm transition ${
+                                loc.role === "home"
+                                  ? "bg-[#e3edff] ring-2 ring-[#5b8def]"
+                                  : "bg-[#f2f6fc] opacity-45 hover:opacity-100"
+                              }`}
+                            >
+                              🏠
+                            </button>
+                            <button
+                              onClick={() => setLocationRole(loc.id, "work")}
+                              disabled={isSavingLoc}
+                              aria-label={`${loc.name}을 직장으로 지정`}
+                              className={`px-1.5 py-1 rounded-lg text-sm transition ${
+                                loc.role === "work"
+                                  ? "bg-[#fff1dd] ring-2 ring-[#e8a13c]"
+                                  : "bg-[#f2f6fc] opacity-45 hover:opacity-100"
+                              }`}
+                            >
+                              🏢
+                            </button>
+                          </div>
                           <button
                             onClick={() => removeSavedLocation(loc.id)}
                             disabled={isSavingLoc}
@@ -901,6 +1010,168 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+                {/* 출퇴근 브리핑 설정 */}
+                <div className="bg-white/60 rounded-2xl p-4 mb-2 shadow-sm border border-white/80">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-[#5a6b8c] flex items-center gap-1.5">
+                      🧳 출퇴근 브리핑
+                      {commuteCfg.enabled && workLoc && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#e8f8ef] text-[#2e9e63]">
+                          매일 아침 {commuteCfg.briefingHour}시
+                        </span>
+                      )}
+                    </h4>
+                    {workLoc && (
+                      <button
+                        onClick={() => updateCommute({ enabled: !commuteCfg.enabled })}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition active:scale-95 ${
+                          commuteCfg.enabled
+                            ? "bg-[#ffe9ec] text-[#e2647c]"
+                            : "bg-[#5b8def] text-white shadow-sm"
+                        }`}
+                      >
+                        {commuteCfg.enabled ? "끄기" : "켜기"}
+                      </button>
+                    )}
+                  </div>
+
+                  {!workLoc ? (
+                    <p className="text-xs font-medium text-[#8a97b3] mt-2 leading-relaxed">
+                      관심 지역 옆 <b>🏢</b>를 눌러 직장을 지정하면, 매일 아침{" "}
+                      <b>출근길+퇴근길 우산 브리핑</b>을 받아요.
+                      {savedLocations.length === 0 &&
+                        " 먼저 직장 위치에서 '관심 지역으로 추가'를 눌러주세요."}
+                    </p>
+                  ) : commuteCfg.enabled ? (
+                    <div className="mt-3 flex flex-col gap-2.5">
+                      <p className="text-xs font-bold text-[#5a6b8c]">
+                        🏠 {homeLoc?.name ?? "현재 위치"}{" "}
+                        <span className="text-[#9aa7c0]">↔</span> 🏢 {workLoc.name}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-[#5a6b8c]">
+                        <label className="flex flex-col gap-1">
+                          브리핑 시각
+                          <select
+                            value={commuteCfg.briefingHour}
+                            onChange={(e) => updateCommute({ briefingHour: +e.target.value })}
+                            className="bg-white rounded-lg px-2 py-1.5 border border-black/5 font-bold text-[#3d3652]"
+                          >
+                            {[5, 6, 7, 8, 9].map((h) => (
+                              <option key={h} value={h}>
+                                오전 {h}시
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          통근 요일
+                          <select
+                            value={commuteCfg.days.length >= 7 ? "all" : "weekday"}
+                            onChange={(e) =>
+                              updateCommute({
+                                days:
+                                  e.target.value === "all"
+                                    ? [0, 1, 2, 3, 4, 5, 6]
+                                    : [1, 2, 3, 4, 5],
+                              })
+                            }
+                            className="bg-white rounded-lg px-2 py-1.5 border border-black/5 font-bold text-[#3d3652]"
+                          >
+                            <option value="weekday">평일만</option>
+                            <option value="all">매일</option>
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          출근 시간대
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={commuteCfg.morning[0]}
+                              onChange={(e) =>
+                                updateCommute({
+                                  morning: [+e.target.value, commuteCfg.morning[1]],
+                                })
+                              }
+                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
+                            >
+                              {[5, 6, 7, 8, 9, 10, 11].map((h) => (
+                                <option key={h} value={h}>
+                                  {h}시
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[#9aa7c0]">~</span>
+                            <select
+                              value={commuteCfg.morning[1]}
+                              onChange={(e) =>
+                                updateCommute({
+                                  morning: [commuteCfg.morning[0], +e.target.value],
+                                })
+                              }
+                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
+                            >
+                              {[6, 7, 8, 9, 10, 11, 12, 13].map((h) => (
+                                <option key={h} value={h}>
+                                  {h}시
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          퇴근 시간대
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={commuteCfg.evening[0]}
+                              onChange={(e) =>
+                                updateCommute({
+                                  evening: [+e.target.value, commuteCfg.evening[1]],
+                                })
+                              }
+                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
+                            >
+                              {[15, 16, 17, 18, 19, 20, 21, 22].map((h) => (
+                                <option key={h} value={h}>
+                                  {h}시
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[#9aa7c0]">~</span>
+                            <select
+                              value={commuteCfg.evening[1]}
+                              onChange={(e) =>
+                                updateCommute({
+                                  evening: [commuteCfg.evening[0], +e.target.value],
+                                })
+                              }
+                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
+                            >
+                              {[16, 17, 18, 19, 20, 21, 22, 23].map((h) => (
+                                <option key={h} value={h}>
+                                  {h}시
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </label>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-semibold text-[#5a6b8c]">
+                        <input
+                          type="checkbox"
+                          checked={commuteCfg.briefingAlways}
+                          onChange={(e) => updateCommute({ briefingAlways: e.target.checked })}
+                          className="accent-[#5b8def] w-3.5 h-3.5"
+                        />
+                        비 소식 없어도 매일 브리핑 받기
+                      </label>
+                    </div>
+                  ) : (
+                    <p className="text-xs font-medium text-[#8a97b3] mt-2 leading-relaxed">
+                      켜면 매일 아침, 출근길과 퇴근길(🏠 {homeLoc?.name ?? "현재 위치"} ↔ 🏢{" "}
+                      {workLoc.name})의 우산 여부를 미리 알려드려요.
+                    </p>
+                  )}
+                </div>
+
                 <button
                   onClick={sendTestPush}
                   disabled={isSubscribing}

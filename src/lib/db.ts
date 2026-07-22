@@ -25,6 +25,18 @@ export interface SavedLocation {
   lat: number;
   lng: number;
   grid: Grid;
+  // 출퇴근 브리핑용 역할 — 🏠 집 / 🏢 직장 (각각 최대 1개)
+  role?: "home" | "work";
+}
+
+// 출퇴근 브리핑 설정
+export interface CommuteConfig {
+  enabled: boolean;
+  morning: [number, number]; // 출근 시간대 (KST 시각, 기본 [7, 9])
+  evening: [number, number]; // 퇴근 시간대 (기본 [18, 20])
+  days: number[]; // 통근 요일 0=일 ~ 6=토 (기본 [1..5])
+  briefingHour: number; // 아침 브리핑 발송 시각 (기본 7)
+  briefingAlways: boolean; // true면 비 없어도 매일 발송
 }
 
 export interface UserRecord {
@@ -36,6 +48,7 @@ export interface UserRecord {
   };
   grid: Grid;
   savedLocations?: SavedLocation[];
+  commute?: CommuteConfig;
   createdAt: number;
 }
 
