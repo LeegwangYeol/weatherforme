@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import WeatherBunny, { type BunnyKind } from "@/components/WeatherBunny";
 import CloudMap from "@/components/CloudMap";
+import RouteTimeline from "@/components/RouteTimeline";
 import DiagnosticsCard from "@/components/DiagnosticsCard";
 
 // ---------------------------------------------------------------------------
@@ -278,6 +279,7 @@ export default function Home() {
 
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [showCloudMap, setShowCloudMap] = useState(false);
+  const [showRouteTimeline, setShowRouteTimeline] = useState(false);
 
   const showBanner = (kind: "ok" | "err", text: string) => {
     setBanner({ kind, text });
@@ -684,6 +686,15 @@ export default function Home() {
   const homeLoc = savedLocations.find((l) => l.role === "home");
   const workLoc = savedLocations.find((l) => l.role === "work");
   const commuteCfg = commute ?? DEFAULT_COMMUTE;
+  // 경로 기능용 집 좌표 — 미지정시 현재 위치가 집 역할 (서버 브리핑 로직과 동일)
+  const homeSpot =
+    workLoc && (homeLoc || location)
+      ? {
+          name: homeLoc?.name ?? "현재 위치",
+          lat: homeLoc?.lat ?? location!.lat,
+          lng: homeLoc?.lng ?? location!.lng,
+        }
+      : null;
 
   return (
     <main
@@ -1170,6 +1181,16 @@ export default function Home() {
                       {workLoc.name})의 우산 여부를 미리 알려드려요.
                     </p>
                   )}
+
+                  {/* 통근 경로 날씨 — 직장이 지정돼 있으면 브리핑 on/off와 무관하게 제공 */}
+                  {homeSpot && workLoc && (
+                    <button
+                      onClick={() => setShowRouteTimeline(true)}
+                      className="w-full mt-3 py-2.5 bg-white/85 hover:bg-white text-[#e8734d] rounded-full font-bold text-xs shadow-sm transition active:scale-[0.98]"
+                    >
+                      통근 경로 날씨 보기 🛣️
+                    </button>
+                  )}
                 </div>
 
                 <button
@@ -1278,7 +1299,26 @@ export default function Home() {
           lng={location.lng}
           place={data?.place ?? null}
           precip={data?.precip ?? null}
+          route={
+            homeSpot && workLoc
+              ? {
+                  home: { lat: homeSpot.lat, lng: homeSpot.lng },
+                  work: { lat: workLoc.lat, lng: workLoc.lng },
+                }
+              : undefined
+          }
           onClose={() => setShowCloudMap(false)}
+        />
+      )}
+
+      {/* 통근 경로 타임라인 모달 */}
+      {showRouteTimeline && homeSpot && workLoc && (
+        <RouteTimeline
+          home={homeSpot}
+          work={{ name: workLoc.name, lat: workLoc.lat, lng: workLoc.lng }}
+          morning={commuteCfg.morning}
+          evening={commuteCfg.evening}
+          onClose={() => setShowRouteTimeline(false)}
         />
       )}
     </main>

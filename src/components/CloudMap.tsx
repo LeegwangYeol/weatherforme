@@ -4,6 +4,7 @@
 // 기상청 초단기예보 격자(5km)를 캔버스에 파스텔 톤으로 렌더링한다.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Play, Pause, LoaderCircle, TriangleAlert, MapPin } from "lucide-react";
+import { latLngToGrid, routeGrids } from "@/lib/kma";
 
 interface CloudFrame {
   tmef: string;
@@ -65,6 +66,7 @@ export default function CloudMap({
   lng,
   place,
   precip,
+  route,
   onClose,
 }: {
   lat: number;
@@ -72,6 +74,8 @@ export default function CloudMap({
   place: string | null;
   // 알림/날씨카드와 동일한 강수 판정 결과 — 지도 상단 문구를 이걸로 통일
   precip: Precip | null;
+  // 통근 경로 오버레이 (집↔직장) — 지정시 핀/연결선/경로 격자 표시
+  route?: { home: { lat: number; lng: number }; work: { lat: number; lng: number } };
   onClose: () => void;
 }) {
   const [state, setState] = useState<MapState>({ status: "loading" });
@@ -154,18 +158,77 @@ export default function CloudMap({
       }
     }
 
-    // 중앙 = 내 위치 표시 (십자 + 링)
-    const c = (Math.floor(size / 2) + 0.5) * px;
-    ctx.strokeStyle = "#f0679e";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(c, c, px * 0.9, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = "#f0679e";
-    ctx.beginPath();
-    ctx.arc(c, c, px * 0.28, 0, Math.PI * 2);
-    ctx.fill();
-  }, [state, frameIdx]);
+    // ---- 통근 경로 오버레이 (집↔직장) ----
+    if (route) {
+      const { center } = state.data;
+      const half = Math.floor(size / 2);
+      // 격자 → 창 내 픽셀 중심 (창은 북쪽이 위: row = center.ny - ny + half)
+      const toPixel = (g: { nx: number; ny: number }) => ({
+        x: (g.nx - center.nx + half + 0.5) * px,
+        y: (center.ny - g.ny + half + 0.5) * px,
+        inside:
+          Math.abs(g.nx - center.nx) <= half && Math.abs(g.ny - center.ny) <= half,
+      });
+
+      const homeG = latLngToGrid(route.home.lat, route.home.lng);
+      const workG = latLngToGrid(route.work.lat, route.work.lng);
+      const path = routeGrids(route.home, route.work);
+
+      // 경로 격자 테두리 (연한 핑크 점선 느낌)
+      ctx.strokeStyle = "rgba(240, 103, 158, 0.45)";
+      ctx.lineWidth = 1.5;
+      for (const g of path) {
+        const p = toPixel(g);
+        if (!p.inside) continue;
+        ctx.beginPath();
+        ctx.roundRect(p.x - px / 2 + 1, p.y - px / 2 + 1, px - 2, px - 2, 3);
+        ctx.stroke();
+      }
+
+      // 집-직장 연결선
+      const hp = toPixel(homeG);
+      const wp = toPixel(workG);
+      ctx.strokeStyle = "rgba(240, 103, 158, 0.7)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(hp.x, hp.y);
+      ctx.lineTo(wp.x, wp.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 🏠/🏢 핀 (흰 원 배경 + 이모지)
+      for (const [p, emoji] of [
+        [hp, "🏠"],
+        [wp, "🏢"],
+      ] as const) {
+        if (!p.inside) continue;
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, px * 0.85, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(240, 103, 158, 0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.font = `${Math.round(px * 1.1)}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(emoji, p.x, p.y + 0.5);
+      }
+    } else {
+      // 경로가 없으면 기존처럼 중앙 = 내 위치 링
+      const c = (Math.floor(size / 2) + 0.5) * px;
+      ctx.strokeStyle = "#f0679e";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(c, c, px * 0.9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#f0679e";
+      ctx.beginPath();
+      ctx.arc(c, c, px * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, [state, frameIdx, route]);
 
   // 지도 상단 안내 문구.
   // 1순위: 알림/날씨카드와 동일한 precip(초단기예보 PTY 판정) → 문구 완전 일치 보장

@@ -60,6 +60,27 @@ export function latLngToGrid(lat: number, lng: number): Grid {
   };
 }
 
+// 두 지점 사이를 직선 보간해 지나는 격자 목록 (중복 제거, 출발→도착 순)
+// — 광주↔포곡(~15km)이면 5개 격자가 나온다. 통근 경로 감시용.
+export function routeGrids(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): Grid[] {
+  const steps = 24; // 5km 격자 대비 충분히 촘촘한 샘플링
+  const out: Grid[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const g = latLngToGrid(a.lat + (b.lat - a.lat) * t, a.lng + (b.lng - a.lng) * t);
+    const key = `${g.nx},${g.ny}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(g);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // KST 시각 / base_date, base_time 계산
 // ---------------------------------------------------------------------------

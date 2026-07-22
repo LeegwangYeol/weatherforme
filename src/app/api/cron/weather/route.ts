@@ -16,6 +16,7 @@ import {
   findPrecipInWindow,
   formatKoreanHour,
   isKmaConfigured,
+  routeGrids,
   type PrecipEvent,
   type HourlyForecast,
   type Grid,
@@ -219,6 +220,32 @@ async function handleCron(req: Request) {
       const [mStart, mEnd] = c.morning ?? [7, 9];
       const [eStart, eEnd] = c.evening ?? [18, 20];
 
+      // 통근 경로의 중간 격자들 (양끝 제외) — 집 미지정시 현재 위치 기준
+      const homeCoords =
+        user.savedLocations?.find((l) => l.role === "home") ?? user.location;
+      const midGrids = routeGrids(
+        { lat: homeCoords.lat, lng: homeCoords.lng },
+        { lat: work.lat, lng: work.lng }
+      ).slice(1, -1);
+
+      // 여러 격자 중 창 안의 첫 강수 (예보 조회 실패 격자는 건너뜀)
+      const findOnGrids = async (
+        grids: Grid[],
+        fetcher: (g: Grid) => Promise<HourlyForecast[]>,
+        start: number,
+        end: number
+      ): Promise<PrecipEvent | null> => {
+        for (const g of grids) {
+          try {
+            const ev = findPrecipInWindow(await fetcher(g), ymd, start, end);
+            if (ev) return ev;
+          } catch {
+            // 개별 격자 실패는 무시 (양끝 판정은 별도 수행)
+          }
+        }
+        return null;
+      };
+
       // (a) 아침 브리핑
       if (force === "briefing" || kstHour === (c.briefingHour ?? 7)) {
         const briefKey = `wfm:brief:${user.id}:${ymd}`;
@@ -232,20 +259,33 @@ async function handleCron(req: Request) {
             const evening =
               findPrecipInWindow(workF, ymd, eStart, eEnd) ??
               findPrecipInWindow(homeF, ymd, eStart, eEnd);
+            // 양끝이 맑아도 경로 중간에 비가 걸릴 수 있음 (Phase 2)
+            const morningMid = morning
+              ? null
+              : await findOnGrids(midGrids, cachedShort, mStart, mEnd);
+            const eveningMid = evening
+              ? null
+              : await findOnGrids(midGrids, cachedShort, eStart, eEnd);
 
-            if (morning || evening || c.briefingAlways) {
-              const part = (label: string, ev: PrecipEvent | null) =>
+            const anyRain = morning || evening || morningMid || eveningMid;
+            if (anyRain || c.briefingAlways) {
+              const part = (
+                label: string,
+                ev: PrecipEvent | null,
+                mid: PrecipEvent | null
+              ) =>
                 ev
                   ? `${label} ${formatKoreanHour(ev.time)} ${kindKo(ev.kind)}${
                       ev.pop != null ? `(${ev.pop}%)` : ""
                     }`
-                  : `${label} 비 소식 없음`;
+                  : mid
+                    ? `${label} 경로 중간 ${formatKoreanHour(mid.time)} ${kindKo(mid.kind)}`
+                    : `${label} 비 소식 없음`;
               const ok = await trySend(user, {
-                title:
-                  morning || evening
-                    ? "☔ 오늘 출퇴근, 우산 챙기세요!"
-                    : "🌤️ 오늘 출퇴근 비 소식 없어요",
-                body: `${part("출근길", morning)} · ${part("퇴근길", evening)}`,
+                title: anyRain
+                  ? "☔ 오늘 출퇴근, 우산 챙기세요!"
+                  : "🌤️ 오늘 출퇴근 비 소식 없어요",
+                body: `${part("출근길", morning, morningMid)} · ${part("퇴근길", evening, eveningMid)}`,
               });
               if (ok) briefingsSent++;
             }
@@ -270,11 +310,22 @@ async function handleCron(req: Request) {
             const eve =
               findPrecipInWindow(workU, ymd, eStart, eEnd) ??
               findPrecipInWindow(homeU, ymd, eStart, eEnd);
-            if (eve) {
-              const ok = await trySend(user, {
-                title: "☔ 퇴근길 비 예보",
-                body: `${formatKoreanHour(eve.time)}부터 ${kindKo(eve.kind)} 소식이 있어요. 우산 챙겼어요?`,
-              });
+            const eveMid = eve
+              ? null
+              : await findOnGrids(midGrids, cachedUltra, eStart, eEnd);
+            if (eve || eveMid) {
+              const ok = await trySend(
+                user,
+                eve
+                  ? {
+                      title: "☔ 퇴근길 비 예보",
+                      body: `${formatKoreanHour(eve.time)}부터 ${kindKo(eve.kind)} 소식이 있어요. 우산 챙겼어요?`,
+                    }
+                  : {
+                      title: "☔ 퇴근길 경로에 비구름",
+                      body: `경로 중간에 ${formatKoreanHour(eveMid!.time)} ${kindKo(eveMid!.kind)} 예보가 있어요. 우산 챙겼어요?`,
+                    }
+              );
               if (ok) remindersSent++;
             }
             if (!force) await cacheSet(remKey, 1, 26 * 3600);
