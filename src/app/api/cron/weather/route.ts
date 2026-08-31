@@ -23,6 +23,9 @@ import {
 } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // 주기적으로(기본 10분 간격, GitHub Actions) 호출되는 강수 감시 엔드포인트.
 // 구독자를 기상청 격자 단위로 묶어 격자당 한 번만 예보를 조회한다.
 

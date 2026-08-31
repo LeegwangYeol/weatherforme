@@ -6,6 +6,9 @@ import {
   type HourlyForecast,
 } from "@/lib/kma";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // 통근 경로(집↔직장) 격자별 향후 6시간 강수형태 매트릭스
 // GET /api/route-weather?aLat=..&aLng=..&bLat=..&bLng=..
 export async function GET(req: Request) {
@@ -51,7 +54,9 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
         },
       }
     );

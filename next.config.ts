@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 import withPWAInit from "@ducanh2912/next-pwa";
 
 const withPWA = withPWAInit({
@@ -13,6 +14,7 @@ const withPWA = withPWAInit({
 });
 
 const nextConfig: NextConfig = {
+  outputFileTracingRoot: path.join(__dirname),
   async headers() {
     return [
       {
@@ -26,6 +28,23 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Type",
             value: "application/javascript; charset=utf-8",
+          },
+        ],
+      },
+      {
+        source: "/api/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          },
+          {
+            key: "Pragma",
+            value: "no-cache",
+          },
+          {
+            key: "Expires",
+            value: "0",
           },
         ],
       },

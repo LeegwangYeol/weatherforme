@@ -8,6 +8,9 @@ import {
 } from "@/lib/kma";
 import { reverseGeocode } from "@/lib/geocode";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // UI에서 현재 날씨 + 6시간 예보를 조회하는 엔드포인트
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -34,14 +37,23 @@ export async function GET(req: Request) {
       reverseGeocode(lat, lng), // 실패시 null (비필수)
     ]);
 
-    return NextResponse.json({
-      grid,
-      place,
-      current,
-      hourly,
-      precip: findPrecip(hourly), // 6시간 내 첫 강수 시점 (없으면 null)
-      updatedAt: Date.now(),
-    });
+    return NextResponse.json(
+      {
+        grid,
+        place,
+        current,
+        hourly,
+        precip: findPrecip(hourly), // 6시간 내 첫 강수 시점 (없으면 null)
+        updatedAt: Date.now(),
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      }
+    );
   } catch (error) {
     console.error("Weather fetch error:", error);
     return NextResponse.json(
@@ -49,7 +61,12 @@ export async function GET(req: Request) {
         error: "KMA_ERROR",
         detail: error instanceof Error ? error.message : String(error),
       },
-      { status: 502 }
+      {
+        status: 502,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+        },
+      }
     );
   }
 }

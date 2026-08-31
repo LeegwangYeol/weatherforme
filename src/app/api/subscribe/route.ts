@@ -9,6 +9,9 @@ import {
 import { latLngToGrid } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // 출퇴근 설정 검증/정규화 — 이상값은 기본값으로
 function sanitizeCommute(raw: unknown): CommuteConfig {
   const c = (raw ?? {}) as Partial<CommuteConfig>;

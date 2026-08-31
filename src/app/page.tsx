@@ -264,7 +264,16 @@ export default function Home() {
   // --- 날씨 / 푸시 / 설치 상태 ---
   const [weather, setWeather] = useState<WeatherState>({ status: "idle" });
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshTick, setRefreshTick] = useState(0);
+  const lastFetchedAtRef = useRef<number>(0);
+  const lastFetchedCoordsRef = useRef<Coords | null>(null);
+  const isFetchingRef = useRef<boolean>(false);
+  const weatherRef = useRef<WeatherState>(weather);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef<number>(0);
+
+  useEffect(() => {
+    weatherRef.current = weather;
+  }, [weather]);
 
   const [swFailed, setSwFailed] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -281,9 +290,9 @@ export default function Home() {
   const [showCloudMap, setShowCloudMap] = useState(false);
   const [showRouteTimeline, setShowRouteTimeline] = useState(false);
 
-  const showBanner = (kind: "ok" | "err", text: string) => {
+  const showBanner = useCallback((kind: "ok" | "err", text: string) => {
     setBanner({ kind, text });
-  };
+  }, []);
 
   // 배너 자동 닫힘
   useEffect(() => {
@@ -320,43 +329,118 @@ export default function Home() {
     return () => window.removeEventListener("beforeinstallprompt", onInstallPrompt);
   }, []);
 
-  // --- 날씨 조회: 위치 변경 / 수동 새로고침 / 10분 주기 ---
-  useEffect(() => {
-    if (!location) return;
-    let cancelled = false;
+  // 날씨 데이터 비동기 조회 (캐시 우회, AbortController 및 경쟁 상태 방지)
+  const fetchWeatherData = useCallback(
+    async (coords: Coords | null, options?: { showLoading?: boolean; force?: boolean }) => {
+      const loc = coords ?? locationRef.current;
+      if (!loc) return;
 
-    const load = async () => {
+      const now = Date.now();
+      const sameCoords =
+        lastFetchedCoordsRef.current !== null &&
+        lastFetchedCoordsRef.current.lat === loc.lat &&
+        lastFetchedCoordsRef.current.lng === loc.lng;
+
+      // 1. 디바운스 / 스로틀링:
+      // 강제 요청(force)이 아니고, 좌표가 같으며, 기존 데이터가 정상(ready)이고 15초 이내면 재호출 생략
+      if (
+        !options?.force &&
+        sameCoords &&
+        weatherRef.current.status === "ready" &&
+        now - lastFetchedAtRef.current < 15000
+      ) {
+        return;
+      }
+
+      // 동일 좌표에 대해 비강제 백그라운드 호출이 이미 진행 중인 경우 중복 호출 방지
+      if (isFetchingRef.current && sameCoords && !options?.force) {
+        return;
+      }
+
+      // 기존 진행 중인 이전 요청이 있으면 중단(취소)하여 최신 요청 우선 처리
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+      const currentRequestId = ++requestIdRef.current;
+
+      isFetchingRef.current = true;
+      lastFetchedCoordsRef.current = loc;
+      if (options?.showLoading) {
+        setRefreshing(true);
+      }
+
       try {
-        const res = await fetch(`/api/weather?lat=${location.lat}&lng=${location.lng}`);
+        const res = await fetch(`/api/weather?lat=${loc.lat}&lng=${loc.lng}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+          signal: abortController.signal,
+        });
+
+        if (requestIdRef.current !== currentRequestId) return;
+
         const json = await res.json();
-        if (cancelled) return;
+        if (requestIdRef.current !== currentRequestId) return;
+
         if (!res.ok) {
           const code =
             json?.error === "KMA_KEY_MISSING" || json?.error === "OUT_OF_COVERAGE"
               ? json.error
               : "OTHER";
-          setWeather({ status: "error", code, detail: json?.detail });
+          // 기존에 이미 준비된 데이터가 있고 동일 위치면 화면을 깨지 않고 유지
+          if (weatherRef.current.status !== "ready" || !sameCoords) {
+            setWeather({ status: "error", code, detail: json?.detail });
+          } else if (options?.showLoading) {
+            showBanner("err", "날씨를 새로고침하지 못했어요.");
+          }
         } else {
           setWeather({ status: "ready", data: json });
+          lastFetchedAtRef.current = Date.now();
         }
-      } catch {
-        if (!cancelled) setWeather({ status: "error", code: "OTHER" });
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        if (requestIdRef.current !== currentRequestId) return;
+        if (weatherRef.current.status !== "ready" || !sameCoords) {
+          setWeather({ status: "error", code: "OTHER" });
+        } else if (options?.showLoading) {
+          showBanner("err", "날씨를 새로고침하지 못했어요. 네트워크 연결을 확인해주세요.");
+        }
       } finally {
-        if (!cancelled) setRefreshing(false);
+        if (requestIdRef.current === currentRequestId) {
+          isFetchingRef.current = false;
+          setRefreshing(false);
+          abortControllerRef.current = null;
+        }
+      }
+    },
+    [showBanner]
+  );
+
+  // 위치 변경 시 날씨 즉시 조회
+  useEffect(() => {
+    if (!location) return;
+    void fetchWeatherData(location, {
+      showLoading: weatherRef.current.status === "idle",
+      force: true,
+    });
+  }, [location, fetchWeatherData]);
+
+  // 컴포넌트 언마운트 시 진행 중인 네트워크 요청 정리
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
-
-    load();
-    const interval = setInterval(load, 10 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [location, refreshTick]);
+  }, []);
 
   const refreshWeather = () => {
     setRefreshing(true);
-    setRefreshTick((t) => t + 1);
+    void fetchWeatherData(locationRef.current, { showLoading: true, force: true });
   };
 
   // 구독 중이면 서버에 저장된 알림 위치를 조용히 갱신
@@ -376,14 +460,8 @@ export default function Home() {
     }
   }, []);
 
-  // 위치 자동 추적 — 앱이 떠 있는 동안 이동(2km+)을 감지하고, 화면 복귀시 재측정.
-  // 웹 플랫폼 제약상 앱이 완전히 꺼진 동안엔 위치 갱신이 불가능하며,
-  // 그동안 알림은 서버가 마지막으로 아는 위치 기준으로 발송된다.
-  const trackingEnabled = Boolean(location);
-  useEffect(() => {
-    if (!trackingEnabled || !("geolocation" in navigator)) return;
-
-    const applyPosition = (position: GeolocationPosition) => {
+  const applyPosition = useCallback(
+    (position: GeolocationPosition) => {
       const coords = {
         lat: position.coords.latitude,
         lng: position.coords.longitude,
@@ -393,7 +471,14 @@ export default function Home() {
       localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(coords));
       setLocationOverride(coords);
       void syncLocationToServer(coords);
-    };
+    },
+    [syncLocationToServer]
+  );
+
+  // 위치 자동 추적 — 앱이 떠 있는 동안 이동(2km+) 감지
+  const trackingEnabled = Boolean(location);
+  useEffect(() => {
+    if (!trackingEnabled || !("geolocation" in navigator)) return;
 
     const watchId = navigator.geolocation.watchPosition(applyPosition, () => {}, {
       enableHighAccuracy: false,
@@ -401,21 +486,50 @@ export default function Home() {
       timeout: 30000,
     });
 
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      navigator.geolocation.getCurrentPosition(applyPosition, () => {}, {
-        enableHighAccuracy: false,
-        maximumAge: 60 * 1000,
-        timeout: 15000,
-      });
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
     return () => {
       navigator.geolocation.clearWatch(watchId);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [trackingEnabled, syncLocationToServer]);
+  }, [trackingEnabled, applyPosition]);
+
+  // 화면 복귀 / 탭 포커스 / bfcache 복원 / 온라인 복귀 시 항상 최신 날씨로 즉시 갱신
+  useEffect(() => {
+    if (!location) return;
+
+    const handleForeground = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      // 1. 앱 복귀 또는 화면 표시 시 최신 날씨 데이터 갱신
+      void fetchWeatherData(locationRef.current, { force: false });
+
+      // 2. 이동 여부 확인 (2km 이상 이동 시 위치 갱신)
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(applyPosition, () => {}, {
+          enableHighAccuracy: false,
+          maximumAge: 60 * 1000,
+          timeout: 15000,
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleForeground);
+    window.addEventListener("focus", handleForeground);
+    window.addEventListener("pageshow", handleForeground);
+    window.addEventListener("online", handleForeground);
+
+    // 앱 활성 상태일 때 5분 주기 자동 갱신
+    const interval = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+        void fetchWeatherData(locationRef.current, { force: false });
+      }
+    }, 5 * 60 * 1000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleForeground);
+      window.removeEventListener("focus", handleForeground);
+      window.removeEventListener("pageshow", handleForeground);
+      window.removeEventListener("online", handleForeground);
+      clearInterval(interval);
+    };
+  }, [location, fetchWeatherData, applyPosition]);
 
   const requestLocation = () => {
     if (!("geolocation" in navigator)) {

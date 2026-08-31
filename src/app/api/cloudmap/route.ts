@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getCloudMap, isApihubConfigured } from "@/lib/vsrt";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // 비구름 지도용 데이터 — 사용자 위치 중심 창의 향후 6시간 강수 격자 프레임
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -24,8 +27,9 @@ export async function GET(req: Request) {
     }
     return NextResponse.json(data, {
       headers: {
-        // 발표 주기가 10분이므로 CDN에 5분 캐시
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+        Pragma: "no-cache",
+        Expires: "0",
       },
     });
   } catch (error) {

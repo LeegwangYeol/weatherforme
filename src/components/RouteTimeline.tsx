@@ -48,20 +48,45 @@ export default function RouteTimeline({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const qs = `aLat=${home.lat}&aLng=${home.lng}&bLat=${work.lat}&bLng=${work.lng}`;
-        const res = await fetch(`/api/route-weather?${qs}`);
+        const res = await fetch(`/api/route-weather?${qs}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        });
         const json = await res.json();
         if (cancelled) return;
-        if (!res.ok) setState({ status: "error", code: json?.error ?? "OTHER" });
-        else setState({ status: "ready", data: json });
+        if (!res.ok) {
+          setState((prev) => (prev.status === "ready" ? prev : { status: "error", code: json?.error ?? "OTHER" }));
+        } else {
+          setState({ status: "ready", data: json });
+        }
       } catch {
-        if (!cancelled) setState({ status: "error", code: "OTHER" });
+        if (!cancelled) {
+          setState((prev) => (prev.status === "ready" ? prev : { status: "error", code: "OTHER" }));
+        }
       }
-    })();
+    };
+
+    void load();
+
+    const onForeground = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void load();
+    };
+
+    document.addEventListener("visibilitychange", onForeground);
+    window.addEventListener("focus", onForeground);
+    window.addEventListener("pageshow", onForeground);
+    window.addEventListener("online", onForeground);
+
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onForeground);
+      window.removeEventListener("focus", onForeground);
+      window.removeEventListener("pageshow", onForeground);
+      window.removeEventListener("online", onForeground);
     };
   }, [home.lat, home.lng, work.lat, work.lng]);
 

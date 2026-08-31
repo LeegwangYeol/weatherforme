@@ -9,6 +9,9 @@ import {
 import { isKmaConfigured } from "@/lib/kma";
 import { isApihubConfigured } from "@/lib/vsrt";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // 앱 내 상태 점검용 — 서버 구성 + (요청시) 이 기기의 등록 상태
 export async function POST(req: Request) {
   try {

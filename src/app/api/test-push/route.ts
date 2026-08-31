@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getUsers, removeUser, subscriptionId } from "@/lib/db";
 import { getWebPush } from "@/lib/push";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // 기기 수신 테스트용 — 요청한 구독으로 즉시 테스트 푸시를 보낸다
 export async function POST(req: Request) {
   try {
