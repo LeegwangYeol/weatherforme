@@ -3,7 +3,7 @@ name: Jules Daily Check
 on:
   schedule:
     # INFO : GitHub evaluates cron in UTC, not KST
-    - cron: '51 20 * * *'
+    - cron: '51'
   workflow_dispatch:
 
 permissions:
@@ -31,7 +31,22 @@ jobs:
               answer you chose under "Assumptions" in the pull request body, then continue.
             - When several candidates qualify, any one is fine. Pick one and go;
               the next daily run picks up the others.
+            - Earlier daily runs may already be fixing something. Run `git fetch origin` and
+              `git branch -r` first; skip any issue that an existing fix branch already addresses.
             - If you cannot settle on a safe fix, finish without changes and without a pull request.
+
+            ## This repository
+            Rain-alert PWA: Next.js (webpack mode) with web-push, subscribers stored in Upstash Redis, KMA (Korea Meteorological Administration) forecast polling behind `/api/cron/weather`, and a service worker in `worker/`. `.github/workflows/weather-cron.yml` calls the deployed endpoint every few minutes; do not change it.
+
+            Setup and checks:
+            - `npm ci`, `npm run lint`, `npm test` (node --test over `tests/**/*.test.ts`), `npm run build`
+            - No KMA key, VAPID keys, Redis or `CRON_SECRET` here; code that needs them is not a defect. Use only the variable names from `.env.example`.
+
+            Focus:
+            - Forecast parsing and the "rain within two hours" detection, the three-hour re-alert cooldown, lat/lon to KMA grid conversion, subscriber dedupe and the 2 km relocation threshold, freshness logic (`tests/freshness.test.ts`), push event handling in `worker/index.ts`, the `CRON_SECRET` bearer check.
+
+            Leave alone:
+            - `weather-cron.yml`, the cron entry in `vercel.json`, `docs/`, the PWA manifest and icons.
 
             ## Goal
             Find ONE real defect and fix it in a small, safe pull request.
@@ -67,6 +82,8 @@ jobs:
             - How it was verified (build/test command and result)
             - Not fixed (problems that need a decision), or "none"
             - Assumptions (questions you would have asked, with the answer you chose), or "none"
+            - Prompt feedback (instructions above that were wrong, missing or unclear for this
+              repository, e.g. a build command that does not exist), or "none"
 
             Reminder: do not ask questions. Decide, finish, and open the pull request or stop.
         run: |
