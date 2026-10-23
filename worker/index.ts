@@ -3,10 +3,18 @@ export {};
 declare let self: ServiceWorkerGlobalScope;
 
 self.addEventListener("push", (event) => {
-  const data = event.data?.json() ?? {
-    title: "WeatherForMe",
-    body: "비가 올 예정입니다!",
-  };
+  let data;
+  try {
+    data = event.data?.json() ?? {
+      title: "WeatherForMe",
+      body: "비가 올 예정입니다!",
+    };
+  } catch {
+    data = {
+      title: "WeatherForMe",
+      body: "비가 올 예정입니다!",
+    };
+  }
 
   // vibrate는 표준 속성이지만 현재 TS lib 정의에 없어 타입만 확장
   const options: NotificationOptions & { vibrate?: number[] } = {
