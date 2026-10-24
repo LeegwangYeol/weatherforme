@@ -250,7 +250,10 @@ async function handleCron(req: Request) {
       };
 
       // (a) 아침 브리핑
-      if (force === "briefing" || kstHour === (c.briefingHour ?? 7)) {
+      // 스케줄러 지연(1.5~3시간)으로 제 시각을 건너뛸 수 있으므로 최대 3시간 창 허용
+      const targetBriefHour = c.briefingHour ?? 7;
+      const briefDiff = (kstHour - targetBriefHour + 24) % 24;
+      if (force === "briefing" || briefDiff <= 3) {
         const briefKey = `wfm:brief:${user.id}:${ymd}`;
         if (force === "briefing" || !(await cacheGet(briefKey))) {
           try {
@@ -302,7 +305,9 @@ async function handleCron(req: Request) {
       }
 
       // (b) 퇴근 1시간 전 리마인더 — 임박 구간이라 초단기예보(더 정확) 사용
-      if (force === "evening" || kstHour === eStart - 1) {
+      const targetRemHour = (eStart - 1 + 24) % 24;
+      const remDiff = (kstHour - targetRemHour + 24) % 24;
+      if (force === "evening" || remDiff <= 3) {
         const remKey = `wfm:evrem:${user.id}:${ymd}`;
         if (force === "evening" || !(await cacheGet(remKey))) {
           try {
