@@ -29,7 +29,7 @@ export const revalidate = 0;
 // 주기적으로(기본 10분 간격, GitHub Actions) 호출되는 강수 감시 엔드포인트.
 // 구독자를 기상청 격자 단위로 묶어 격자당 한 번만 예보를 조회한다.
 
-function buildMessage(event: PrecipEvent, locationName?: string): { title: string; body: string } {
+function buildMessage(event: PrecipEvent, locationName?: string): { title: string; body: string; tag: string } {
   const when = formatKoreanHour(event.time);
   const prefix = locationName && locationName !== "현재 위치" ? `[${locationName}] ` : "";
   switch (event.kind) {
@@ -37,16 +37,19 @@ function buildMessage(event: PrecipEvent, locationName?: string): { title: strin
       return {
         title: `❄️ ${prefix}곧 눈이 와요`,
         body: `${when}부터 눈 예보가 있어요. 따뜻하게 챙겨 입으세요!`,
+        tag: "weather-alert",
       };
     case "sleet":
       return {
         title: `🌨️ ${prefix}진눈깨비 소식`,
         body: `${when}부터 비/눈 예보가 있어요. 우산 꼭 챙기세요!`,
+        tag: "weather-alert",
       };
     default:
       return {
         title: `☔ ${prefix}곧 비가 와요`,
         body: `${when}부터 비 예보가 있어요. 나가기 전에 우산 챙기세요!`,
+        tag: "weather-alert",
       };
   }
 }
@@ -193,7 +196,7 @@ async function handleCron(req: Request) {
 
     const trySend = async (
       user: UserRecord,
-      message: { title: string; body: string }
+      message: { title: string; body: string; tag?: string }
     ): Promise<boolean> => {
       try {
         await webpush.sendNotification(user.subscription, JSON.stringify(message));
@@ -289,6 +292,7 @@ async function handleCron(req: Request) {
                   ? "☔ 오늘 출퇴근, 우산 챙기세요!"
                   : "🌤️ 오늘 출퇴근 비 소식 없어요",
                 body: `${part("출근길", morning, morningMid)} · ${part("퇴근길", evening, eveningMid)}`,
+                tag: "weather-briefing",
               });
               if (ok) briefingsSent++;
             }
@@ -323,10 +327,12 @@ async function handleCron(req: Request) {
                   ? {
                       title: "☔ 퇴근길 비 예보",
                       body: `${formatKoreanHour(eve.time)}부터 ${kindKo(eve.kind)} 소식이 있어요. 우산 챙겼어요?`,
+                      tag: "weather-evening",
                     }
                   : {
                       title: "☔ 퇴근길 경로에 비구름",
                       body: `경로 중간에 ${formatKoreanHour(eveMid!.time)} ${kindKo(eveMid!.kind)} 예보가 있어요. 우산 챙겼어요?`,
+                      tag: "weather-evening",
                     }
               );
               if (ok) remindersSent++;
