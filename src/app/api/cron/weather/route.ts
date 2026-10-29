@@ -302,7 +302,7 @@ async function handleCron(req: Request) {
       }
 
       // (b) 퇴근 1시간 전 리마인더 — 임박 구간이라 초단기예보(더 정확) 사용
-      if (force === "evening" || kstHour === eStart - 1) {
+      if (force === "evening" || kstHour === (eStart - 1 + 24) % 24) {
         const remKey = `wfm:evrem:${user.id}:${ymd}`;
         if (force === "evening" || !(await cacheGet(remKey))) {
           try {
