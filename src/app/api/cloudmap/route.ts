@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCloudMap, isApihubConfigured } from "@/lib/vsrt";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
       },
     });
   } catch (error) {
-    console.error("Cloudmap error:", error);
+    logger.error("Cloudmap", "Cloudmap generation failed", error, { lat, lng });
     return NextResponse.json(
       {
         error: "APIHUB_ERROR",

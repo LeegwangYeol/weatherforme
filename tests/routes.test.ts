@@ -67,4 +67,78 @@ describe("API Route Config & Headers Verification", () => {
     assert.match(routeTimeline, /window\.addEventListener\(["']pageshow["']/);
     assert.match(routeTimeline, /window\.addEventListener\(["']online["']/);
   });
+
+  test("api/push-status checks cooldown using actual grid coordinates instead of literal 'current'", () => {
+    const pushStatus = fs.readFileSync(path.join(SRC_DIR, "push-status/route.ts"), "utf-8");
+    assert.match(pushStatus, /\$\{user\.grid\.nx\},\$\{user\.grid\.ny\}/);
+    assert.doesNotMatch(pushStatus, /wasNotifiedRecently\(id,\s*["']current["']\)/);
+  });
+
+  test("worker/index.ts safely catches malformed JSON push payloads and supports distinct tags", () => {
+    const workerContent = fs.readFileSync(path.resolve(import.meta.dirname, "../worker/index.ts"), "utf-8");
+    assert.match(workerContent, /try\s*\{[\s\S]*?event\.data\?\.json\(\)[\s\S]*?\}\s*catch/);
+    assert.match(workerContent, /data\.tag\s*\|\|\s*["']weather-alert["']/);
+  });
+
+  test("api/cron/weather tolerates scheduler delays (up to 3h) and midnight wrap for reminders", () => {
+    const cronContent = fs.readFileSync(path.join(SRC_DIR, "cron/weather/route.ts"), "utf-8");
+    assert.match(cronContent, /\(kstHour\s*-\s*targetBriefHour\s*\+\s*24\)\s*%\s*24/);
+    assert.match(cronContent, /\(eStart\s*-\s*1\s*\+\s*24\)\s*%\s*24/);
+    assert.match(cronContent, /weather-briefing/);
+    assert.match(cronContent, /weather-evening/);
+  });
+
+  test("src/lib/kma.ts falls back from data.go.kr to apihub.kma.go.kr when gateway fails", async () => {
+    const { getUltraSrtNcst } = await import("../src/lib/kma.ts");
+    const origServiceKey = process.env.KMA_SERVICE_KEY;
+    const origApihubKey = process.env.KMA_APIHUB_KEY;
+    const origFetch = globalThis.fetch;
+
+    process.env.KMA_SERVICE_KEY = "test-data-go-kr-key";
+    process.env.KMA_APIHUB_KEY = "test-apihub-key";
+
+    const calledUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calledUrls.push(url);
+      if (url.includes("apis.data.go.kr")) {
+        // Simulate data.go.kr returning unexpected gateway JSON without response.header.resultCode
+        return new Response(JSON.stringify({ cmmMsgHeader: { errMsg: "SERVICE ERROR", returnReasonCode: "04" } }), {
+          status: 200,
+        });
+      }
+      // Simulate apihub.kma.go.kr succeeding
+      return new Response(
+        JSON.stringify({
+          response: {
+            header: { resultCode: "00", resultMsg: "NORMAL_SERVICE" },
+            body: {
+              items: {
+                item: [
+                  { category: "T1H", obsrValue: "21.5" },
+                  { category: "PTY", obsrValue: "0" },
+                  { category: "REH", obsrValue: "55" },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200 }
+      );
+    }) as typeof fetch;
+
+    try {
+      const res = await getUltraSrtNcst({ nx: 62, ny: 123 });
+      assert.equal(res.temp, 21.5);
+      assert.equal(res.humidity, 55);
+      assert.ok(calledUrls.some((u) => u.includes("apis.data.go.kr")), "Tried data.go.kr first");
+      assert.ok(calledUrls.some((u) => u.includes("apihub.kma.go.kr")), "Fell back to apihub.kma.go.kr");
+    } finally {
+      globalThis.fetch = origFetch;
+      if (origServiceKey === undefined) delete process.env.KMA_SERVICE_KEY;
+      else process.env.KMA_SERVICE_KEY = origServiceKey;
+      if (origApihubKey === undefined) delete process.env.KMA_APIHUB_KEY;
+      else process.env.KMA_APIHUB_KEY = origApihubKey;
+    }
+  });
 });

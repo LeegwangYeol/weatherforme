@@ -7,6 +7,7 @@ import {
   isKmaConfigured,
 } from "@/lib/kma";
 import { reverseGeocode } from "@/lib/geocode";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,7 +56,7 @@ export async function GET(req: Request) {
       }
     );
   } catch (error) {
-    console.error("Weather fetch error:", error);
+    logger.error("KMA", "Weather fetch error", error, { lat, lng, grid });
     return NextResponse.json(
       {
         error: "KMA_ERROR",

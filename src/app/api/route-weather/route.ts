@@ -5,6 +5,7 @@ import {
   isKmaConfigured,
   type HourlyForecast,
 } from "@/lib/kma";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -61,7 +62,13 @@ export async function GET(req: Request) {
       }
     );
   } catch (error) {
-    console.error("Route weather error:", error);
+    logger.error("Route", "Route weather calculation error", error, {
+      aLat,
+      aLng,
+      bLat,
+      bLng,
+      gridCount: grids.length,
+    });
     return NextResponse.json(
       {
         error: "KMA_ERROR",

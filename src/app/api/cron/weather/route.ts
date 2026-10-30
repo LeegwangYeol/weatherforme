@@ -22,6 +22,7 @@ import {
   type Grid,
 } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -117,7 +118,7 @@ async function handleCron(req: Request) {
         event = findPrecip(hourly, lookaheadHours);
       } catch (error) {
         gridErrors++;
-        console.error(`Forecast error for grid ${gridKey}:`, error);
+        logger.warn("Cron", `Forecast error for grid ${gridKey}`, { error, gridKey });
         continue;
       }
       if (!event) continue;
@@ -136,7 +137,10 @@ async function handleCron(req: Request) {
         const { user, locationName } = target;
         if (await wasNotifiedRecently(user.id, gridKey)) continue;
 
-        const message = buildMessage(event, locationName);
+        const message = {
+          ...buildMessage(event, locationName),
+          tag: "weather-alert",
+        };
 
         try {
           await webpush.sendNotification(
@@ -151,7 +155,7 @@ async function handleCron(req: Request) {
             // 구독이 만료/해지된 경우 정리
             await removeUser(user.id);
           } else {
-            console.error("Push send error for user", user.id, error);
+            logger.error("Cron", `Push send error for user ${user.id}`, error, { userId: user.id, gridKey });
           }
         }
       }
@@ -193,7 +197,7 @@ async function handleCron(req: Request) {
 
     const trySend = async (
       user: UserRecord,
-      message: { title: string; body: string }
+      message: { title: string; body: string; tag?: string }
     ): Promise<boolean> => {
       try {
         await webpush.sendNotification(user.subscription, JSON.stringify(message));
@@ -201,7 +205,7 @@ async function handleCron(req: Request) {
       } catch (error) {
         const statusCode = (error as { statusCode?: number }).statusCode;
         if (statusCode === 410 || statusCode === 404) await removeUser(user.id);
-        else console.error("Push send error for user", user.id, error);
+        else logger.error("Cron", `Push send error for user ${user.id}`, error, { userId: user.id });
         return false;
       }
     };
@@ -218,7 +222,6 @@ async function handleCron(req: Request) {
       };
 
       const days = c.days?.length ? c.days : [1, 2, 3, 4, 5];
-      if (!force && !days.includes(kstDay)) continue;
 
       const [mStart, mEnd] = c.morning ?? [7, 9];
       const [eStart, eEnd] = c.evening ?? [18, 20];
@@ -235,12 +238,13 @@ async function handleCron(req: Request) {
       const findOnGrids = async (
         grids: Grid[],
         fetcher: (g: Grid) => Promise<HourlyForecast[]>,
+        targetYmd: string,
         start: number,
         end: number
       ): Promise<PrecipEvent | null> => {
         for (const g of grids) {
           try {
-            const ev = findPrecipInWindow(await fetcher(g), ymd, start, end);
+            const ev = findPrecipInWindow(await fetcher(g), targetYmd, start, end);
             if (ev) return ev;
           } catch {
             // 개별 격자 실패는 무시 (양끝 판정은 별도 수행)
@@ -249,8 +253,10 @@ async function handleCron(req: Request) {
         return null;
       };
 
-      // (a) 아침 브리핑
-      if (force === "briefing" || kstHour === (c.briefingHour ?? 7)) {
+      // (a) 아침 브리핑 — 스케줄러 지연(최대 3시간)에도 누락되지 않도록 여유 창 허용
+      const targetBriefHour = c.briefingHour ?? 7;
+      const briefDiff = (kstHour - targetBriefHour + 24) % 24;
+      if (force === "briefing" || (days.includes(kstDay) && briefDiff <= 3)) {
         const briefKey = `wfm:brief:${user.id}:${ymd}`;
         if (force === "briefing" || !(await cacheGet(briefKey))) {
           try {
@@ -265,10 +271,10 @@ async function handleCron(req: Request) {
             // 양끝이 맑아도 경로 중간에 비가 걸릴 수 있음 (Phase 2)
             const morningMid = morning
               ? null
-              : await findOnGrids(midGrids, cachedShort, mStart, mEnd);
+              : await findOnGrids(midGrids, cachedShort, ymd, mStart, mEnd);
             const eveningMid = evening
               ? null
-              : await findOnGrids(midGrids, cachedShort, eStart, eEnd);
+              : await findOnGrids(midGrids, cachedShort, ymd, eStart, eEnd);
 
             const anyRain = morning || evening || morningMid || eveningMid;
             if (anyRain || c.briefingAlways) {
@@ -289,6 +295,7 @@ async function handleCron(req: Request) {
                   ? "☔ 오늘 출퇴근, 우산 챙기세요!"
                   : "🌤️ 오늘 출퇴근 비 소식 없어요",
                 body: `${part("출근길", morning, morningMid)} · ${part("퇴근길", evening, eveningMid)}`,
+                tag: "weather-briefing",
               });
               if (ok) briefingsSent++;
             }
@@ -296,14 +303,21 @@ async function handleCron(req: Request) {
             if (!force) await cacheSet(briefKey, 1, 26 * 3600);
           } catch (error) {
             briefErrors++;
-            console.error("Briefing error for user", user.id, error);
+            logger.error("Cron", `Briefing error for user ${user.id}`, error, { userId: user.id });
           }
         }
       }
 
-      // (b) 퇴근 1시간 전 리마인더 — 임박 구간이라 초단기예보(더 정확) 사용
-      if (force === "evening" || kstHour === eStart - 1) {
-        const remKey = `wfm:evrem:${user.id}:${ymd}`;
+      // (b) 퇴근 1시간 전 리마인더 — 자정(eStart=0 → 전날 23시) 및 스케줄러 지연(최대 3시간) 대응
+      const targetRemHour = (eStart - 1 + 24) % 24;
+      const remDiff = (kstHour - targetRemHour + 24) % 24;
+      const isMidnightWrap = eStart === 0 && kstHour === 23;
+      const eveDateObj = isMidnightWrap ? new Date(kst.getTime() + 24 * 3600 * 1000) : kst;
+      const eveDay = eveDateObj.getUTCDay();
+      const eveYmd = `${eveDateObj.getUTCFullYear()}${pad2(eveDateObj.getUTCMonth() + 1)}${pad2(eveDateObj.getUTCDate())}`;
+
+      if (force === "evening" || (days.includes(eveDay) && remDiff <= 3)) {
+        const remKey = `wfm:evrem:${user.id}:${eveYmd}`;
         if (force === "evening" || !(await cacheGet(remKey))) {
           try {
             const [workU, homeU] = await Promise.all([
@@ -311,11 +325,11 @@ async function handleCron(req: Request) {
               cachedUltra(home.grid),
             ]);
             const eve =
-              findPrecipInWindow(workU, ymd, eStart, eEnd) ??
-              findPrecipInWindow(homeU, ymd, eStart, eEnd);
+              findPrecipInWindow(workU, eveYmd, eStart, eEnd) ??
+              findPrecipInWindow(homeU, eveYmd, eStart, eEnd);
             const eveMid = eve
               ? null
-              : await findOnGrids(midGrids, cachedUltra, eStart, eEnd);
+              : await findOnGrids(midGrids, cachedUltra, eveYmd, eStart, eEnd);
             if (eve || eveMid) {
               const ok = await trySend(
                 user,
@@ -323,10 +337,12 @@ async function handleCron(req: Request) {
                   ? {
                       title: "☔ 퇴근길 비 예보",
                       body: `${formatKoreanHour(eve.time)}부터 ${kindKo(eve.kind)} 소식이 있어요. 우산 챙겼어요?`,
+                      tag: "weather-evening",
                     }
                   : {
                       title: "☔ 퇴근길 경로에 비구름",
                       body: `경로 중간에 ${formatKoreanHour(eveMid!.time)} ${kindKo(eveMid!.kind)} 예보가 있어요. 우산 챙겼어요?`,
+                      tag: "weather-evening",
                     }
               );
               if (ok) remindersSent++;
@@ -334,7 +350,7 @@ async function handleCron(req: Request) {
             if (!force) await cacheSet(remKey, 1, 26 * 3600);
           } catch (error) {
             briefErrors++;
-            console.error("Evening reminder error for user", user.id, error);
+            logger.error("Cron", `Evening reminder error for user ${user.id}`, error, { userId: user.id });
           }
         }
       }
@@ -352,7 +368,7 @@ async function handleCron(req: Request) {
       persistentStore: isPersistent,
     });
   } catch (error) {
-    console.error("Cron error:", error);
+    logger.error("Cron", "Cron execution fatal error", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

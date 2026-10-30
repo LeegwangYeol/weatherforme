@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 import { isKmaConfigured } from "@/lib/kma";
 import { isApihubConfigured } from "@/lib/vsrt";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,17 +36,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ server, device: { registered: false } });
     }
 
+    const gridKey = `${user.grid.nx},${user.grid.ny}`;
     return NextResponse.json({
       server,
       device: {
         registered: true,
         grid: user.grid,
         // 쿨다운 중이면 같은 비에 대한 재알림이 잠시 억제됨을 표시
-        cooldownActive: await wasNotifiedRecently(id, "current"),
+        cooldownActive: await wasNotifiedRecently(id, gridKey),
       },
     });
   } catch (error) {
-    console.error("Push status error:", error);
+    logger.error("PushStatus", "Push status diagnostics check failed", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

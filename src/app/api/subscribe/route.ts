@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 import { latLngToGrid } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,7 +58,7 @@ export async function GET(req: Request) {
       commute: user.commute ?? null,
     });
   } catch (error) {
-    console.error("GET subscription error:", error);
+    logger.error("Subscribe", "GET subscription query failed", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
@@ -97,11 +98,11 @@ export async function POST(req: Request) {
           body: "이제 비가 오기 1~2시간 전에 미리 알려드릴게요.",
         })
       )
-      .catch((e) => console.error("Welcome push error:", e));
+      .catch((e) => logger.warn("Push", "Welcome push failed to send", { error: e, id }));
 
     return NextResponse.json({ success: true, id });
   } catch (error) {
-    console.error("Subscription error:", error);
+    logger.error("Subscribe", "Subscription save error", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
@@ -147,7 +148,7 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Location update error:", error);
+    logger.error("Subscribe", "Location/commute update error", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
@@ -164,7 +165,7 @@ export async function DELETE(req: Request) {
     await removeUser(subscriptionId(endpoint));
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Unsubscribe error:", error);
+    logger.error("Subscribe", "Unsubscribe error", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

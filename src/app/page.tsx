@@ -29,13 +29,14 @@ import {
   PlusSquare,
   Download,
   TriangleAlert,
-  LoaderCircle,
   X,
 } from "lucide-react";
 import WeatherBunny, { type BunnyKind } from "@/components/WeatherBunny";
 import CloudMap from "@/components/CloudMap";
 import RouteTimeline from "@/components/RouteTimeline";
 import DiagnosticsCard from "@/components/DiagnosticsCard";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { logger } from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
 // 타입 (API 응답과 동일한 형태)
@@ -224,6 +225,10 @@ export default function Home() {
     if (process.env.NODE_ENV !== "production") return "dev";
     return "ok";
   }, "checking");
+  const permissionDenied = useClientValue(
+    () => typeof Notification !== "undefined" && Notification.permission === "denied",
+    false
+  );
   const savedLocationJson = useClientValue(
     () => localStorage.getItem(LOCATION_STORAGE_KEY),
     null
@@ -587,7 +592,7 @@ export default function Home() {
       setIsSubscribed(true);
       showBanner("ok", "알림 설정 완료! 확인 푸시를 보냈어요.");
     } catch (error) {
-      console.error("Failed to subscribe:", error);
+      logger.error("Client:Subscribe", "Failed to subscribe to push notifications", error);
       showBanner(
         "err",
         Notification.permission === "denied"
@@ -625,7 +630,7 @@ export default function Home() {
         showBanner("err", "테스트 발송에 실패했어요. 잠시 후 다시 시도해주세요.");
       }
     } catch (error) {
-      console.error("Test push failed:", error);
+      logger.error("Client:TestPush", "Test push delivery failed", error);
       showBanner("err", "테스트 발송에 실패했어요. 알림을 껐다 다시 켜보세요.");
     } finally {
       setIsSubscribing(false);
@@ -648,7 +653,7 @@ export default function Home() {
       setIsSubscribed(false);
       showBanner("ok", "알림을 해제했어요.");
     } catch (error) {
-      console.error("Failed to unsubscribe:", error);
+      logger.error("Client:Unsubscribe", "Failed to unsubscribe from push notifications", error);
       showBanner("err", "알림 해제에 실패했어요.");
     } finally {
       setIsSubscribing(false);
@@ -789,9 +794,6 @@ export default function Home() {
     }
   };
 
-  const pushSupport = swFailed ? "unsupported" : pushEnv;
-  // iOS는 홈 화면에 설치된 상태에서만 웹 푸시 지원 (iOS 16.4+)
-  const iosNeedsInstall = isIOS && !isStandalone;
   const iosTooOld = isIOS && iosVersion > 0 && iosVersion < 16.4;
   const data = weather.status === "ready" ? weather.data : null;
   const condition = data ? conditionOf(data.current.pty, data.hourly[0]?.sky ?? 1) : null;
@@ -811,630 +813,651 @@ export default function Home() {
       : null;
 
   return (
-    <main
-      className={`flex-1 min-h-dvh bg-gradient-to-b ${SKY_BG[bunnyKind]} text-[#3d3652] p-6 relative overflow-hidden transition-colors duration-700`}
-      style={{
-        paddingTop: "calc(env(safe-area-inset-top) + 1rem)",
-        paddingBottom: "calc(env(safe-area-inset-bottom) + 3rem)",
-      }}
-    >
-      {/* 배경 구름 장식 */}
-      <div className="absolute top-[6%] left-[-12%] w-56 h-20 bg-white/50 blur-2xl rounded-full pointer-events-none" />
-      <div className="absolute top-[16%] right-[-14%] w-64 h-24 bg-white/40 blur-2xl rounded-full pointer-events-none" />
-      <div className="absolute bottom-[8%] left-[-10%] w-72 h-28 bg-white/30 blur-3xl rounded-full pointer-events-none" />
+    <div className="min-h-dvh w-full flex justify-center bg-slate-900/5 md:bg-gradient-to-br md:from-[#a9c9eb] md:via-[#c9e4fd] md:to-[#dcebf9] transition-all">
+      <main
+        className={`w-full max-w-md min-h-dvh md:my-6 md:min-h-0 md:rounded-[40px] md:shadow-2xl md:border md:border-white/60 bg-gradient-to-b ${SKY_BG[bunnyKind]} text-[#3d3652] p-5 sm:p-6 relative overflow-x-hidden transition-colors duration-700 flex flex-col`}
+        style={{
+          paddingTop: "calc(env(safe-area-inset-top) + 1rem)",
+          paddingBottom: "calc(env(safe-area-inset-bottom) + 3rem)",
+        }}
+      >
+        {/* 배경 구름 장식 */}
+        <div className="absolute top-[6%] left-[-12%] w-56 h-20 bg-white/50 blur-2xl rounded-full pointer-events-none" />
+        <div className="absolute top-[16%] right-[-14%] w-64 h-24 bg-white/40 blur-2xl rounded-full pointer-events-none" />
+        <div className="absolute bottom-[8%] left-[-10%] w-72 h-28 bg-white/30 blur-3xl rounded-full pointer-events-none" />
 
-      <header className="flex justify-between items-center py-4 relative z-10">
-        <h1 className="text-2xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[#5b8def] to-[#f487a8]">
-          WeatherForMe
-        </h1>
-        {location && (
-          <button
-            onClick={refreshWeather}
-            aria-label="새로고침"
-            className="p-2.5 bg-white/70 rounded-full shadow-sm border border-white/80 text-[#6b7694] hover:text-[#3d3652] transition"
+        <header className="flex justify-between items-center py-4 relative z-10">
+          <h1 className="text-2xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[#5b8def] to-[#f487a8]">
+            WeatherForMe
+          </h1>
+          {location && (
+            <button
+              onClick={refreshWeather}
+              aria-label="새로고침"
+              className="p-2.5 bg-white/70 rounded-full shadow-sm border border-white/80 text-[#526585] hover:text-[#3d3652] transition focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none cursor-pointer"
+            >
+              <RefreshCw size={18} className={refreshing || weatherLoading ? "animate-spin" : ""} />
+            </button>
+          )}
+        </header>
+
+        {/* 상태 배너 */}
+        {banner && (
+          <div
+            className={`relative z-20 mb-3 px-4 py-3 rounded-2xl text-sm font-semibold shadow-sm ${
+              banner.kind === "ok"
+                ? "bg-[#e8f8ef] text-[#2e9e63]"
+                : "bg-[#ffe9ec] text-[#e2647c]"
+            }`}
           >
-            <RefreshCw size={18} className={refreshing || weatherLoading ? "animate-spin" : ""} />
-          </button>
+            {banner.text}
+          </div>
         )}
-      </header>
 
-      {/* 상태 배너 */}
-      {banner && (
-        <div
-          className={`relative z-20 mb-3 px-4 py-3 rounded-2xl text-sm font-semibold shadow-sm ${
-            banner.kind === "ok"
-              ? "bg-[#e8f8ef] text-[#2e9e63]"
-              : "bg-[#ffe9ec] text-[#e2647c]"
-          }`}
-        >
-          {banner.text}
-        </div>
-      )}
-
-      <div className="mt-2 relative z-10 flex flex-col gap-5">
-        {/* ------------------------------------------------ 날씨 카드 */}
-        <section className="bg-white/70 backdrop-blur-xl border border-white/80 rounded-[32px] p-6 min-h-[260px] shadow-xl shadow-[#8aa3c4]/20 relative overflow-hidden">
-          {!location && (
-            <div className="flex flex-col items-center justify-center gap-3 py-2">
-              <div className="relative bg-white rounded-2xl px-4 py-3 shadow-md text-sm font-semibold">
-                위치를 알려주면 내가 하늘을 지켜볼게요!
-                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45" />
-              </div>
-              <WeatherBunny kind="idle" size={150} />
-              <button
-                onClick={requestLocation}
-                disabled={locating}
-                className="w-full py-3.5 bg-[#5b8def] hover:bg-[#4a7de6] disabled:opacity-60 text-white rounded-full font-bold shadow-lg shadow-[#5b8def]/30 transition active:scale-[0.98]"
-              >
-                {locating ? "위치 찾는 중..." : "현재 위치로 시작하기 📍"}
-              </button>
-            </div>
-          )}
-
-          {weatherLoading && (
-            <div className="flex flex-col items-center justify-center gap-3 py-2">
-              <div className="relative bg-white rounded-2xl px-4 py-3 shadow-md text-sm font-semibold">
-                하늘을 보는 중이에요...
-                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45" />
-              </div>
-              <WeatherBunny kind="idle" size={150} />
-              <LoaderCircle size={22} className="animate-spin text-[#8a97b3]" />
-            </div>
-          )}
-
-          {location && weather.status === "error" && (
-            <div className="flex flex-col items-center justify-center gap-3 py-2 text-center">
-              <div className="relative bg-white rounded-2xl px-4 py-3 shadow-md text-sm font-semibold text-[#c98a3c]">
-                <TriangleAlert size={15} className="inline mr-1 -mt-0.5" />
-                {weather.code === "KMA_KEY_MISSING"
-                  ? "기상청 API 키가 아직 없어요"
-                  : weather.code === "OUT_OF_COVERAGE"
-                    ? "여긴 한반도 밖이에요! 🇰🇷"
-                    : "날씨를 불러오지 못했어요"}
-                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45" />
-              </div>
-              <WeatherBunny kind="cloud" size={140} />
-              {weather.code === "KMA_KEY_MISSING" ? (
-                <p className="text-sm text-[#6b7694] max-w-[280px]">
-                  공공데이터포털 단기예보 키를
-                  <code className="mx-1 px-1.5 py-0.5 bg-[#eef2f8] rounded text-xs">
-                    KMA_SERVICE_KEY
-                  </code>
-                  에 설정해주세요.
-                </p>
-              ) : weather.code === "OTHER" ? (
-                <button
-                  onClick={refreshWeather}
-                  className="px-6 py-2.5 bg-white rounded-full text-sm font-bold text-[#5b8def] shadow-md transition active:scale-[0.98]"
-                >
-                  다시 시도
-                </button>
-              ) : null}
-            </div>
-          )}
-
-          {data && condition && (
-            <div className="relative">
-              <p className="text-xs text-[#8a97b3] font-medium flex items-center gap-1">
-                <MapPin size={12} className="text-[#f487a8]" />
-                <span className="font-bold text-[#6b7694]">
-                  {data.place ?? "현재 위치"}
-                </span>
-                · 기상청 실황
-              </p>
-
-              {/* 말풍선 */}
-              <div className="relative mt-3 bg-white rounded-2xl px-4 py-3 shadow-md text-sm font-bold w-fit max-w-full">
-                {speechOf(data)}
-                <div className="absolute -bottom-1.5 left-24 w-3 h-3 bg-white rotate-45" />
-              </div>
-
-              {/* 온도 + 토끼 */}
-              <div className="flex items-center justify-between mt-1">
-                <div className="shrink-0">
-                  <p className="text-[64px] leading-none font-extrabold mt-4 tracking-tighter">
-                    {data.current.temp !== null ? `${Math.round(data.current.temp)}°` : "--°"}
-                  </p>
-                  <p className={`mt-2 text-lg font-bold ${condition.cls}`}>{condition.label}</p>
+        <div className="mt-2 relative z-10 flex flex-col gap-5">
+          {/* ------------------------------------------------ 날씨 카드 */}
+          <section className="bg-white/70 backdrop-blur-xl border border-white/80 rounded-[32px] p-6 min-h-[260px] shadow-xl shadow-[#8aa3c4]/20 relative overflow-hidden">
+            {!location && (
+              <div className="flex flex-col items-center justify-center gap-3 py-2">
+                <div className="relative bg-white/95 rounded-2xl px-4 py-3 shadow-md text-sm font-semibold text-[#3d3652]">
+                  위치를 알려주면 내가 하늘을 지켜볼게요!
+                  <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45" />
                 </div>
-                <WeatherBunny kind={bunnyKind} size={160} />
+                <WeatherBunny kind="idle" size={150} />
+                <button
+                  onClick={requestLocation}
+                  disabled={locating}
+                  className="w-full py-3.5 bg-[#5b8def] hover:bg-[#4a7de6] disabled:opacity-60 text-white rounded-full font-bold shadow-lg shadow-[#5b8def]/30 transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none cursor-pointer"
+                >
+                  {locating ? "위치 찾는 중..." : "현재 위치로 시작하기 📍"}
+                </button>
               </div>
+            )}
 
-              {/* 지표 칩 */}
-              <div className="flex gap-2 mt-3 flex-wrap text-xs font-semibold text-[#5a6b8c]">
-                <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
-                  <Droplets size={13} className="text-[#5b8def] metric-bob" />
-                  습도{" "}
-                  <b className="metric-shimmer">
-                    {data.current.humidity !== null ? `${data.current.humidity}%` : "--"}
-                  </b>
-                </span>
-                <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
-                  <Wind size={13} className="text-[#5eb8b0] metric-sway" />
-                  바람{" "}
-                  <b className="metric-shimmer">
-                    {data.current.windSpeed !== null ? `${data.current.windSpeed}m/s` : "--"}
-                  </b>
-                </span>
-                {data.current.pty > 0 && (
+            {weatherLoading && (
+              <div className="flex flex-col gap-4 animate-fade-in" role="status" aria-label="날씨 정보를 불러오는 중입니다">
+                <div className="flex justify-between items-center">
+                  <div className="h-4 w-28 rounded-full animate-shimmer" />
+                  <div className="h-4 w-16 rounded-full animate-shimmer" />
+                </div>
+                <div className="h-10 w-48 rounded-2xl animate-shimmer mx-auto" />
+                <div className="flex items-center justify-between mt-1">
+                  <div className="flex flex-col gap-2">
+                    <div className="h-16 w-28 rounded-2xl animate-shimmer" />
+                    <div className="h-6 w-20 rounded-lg animate-shimmer" />
+                  </div>
+                  <div className="h-28 w-28 rounded-full animate-shimmer" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="h-7 w-20 rounded-full animate-shimmer" />
+                  <div className="h-7 w-20 rounded-full animate-shimmer" />
+                  <div className="h-7 w-20 rounded-full animate-shimmer" />
+                </div>
+                <div className="grid grid-cols-6 gap-1.5 mt-2">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="h-20 rounded-2xl animate-shimmer" />
+                  ))}
+                </div>
+                <div className="h-11 w-full rounded-full animate-shimmer mt-2" />
+              </div>
+            )}
+
+            {location && weather.status === "error" && (
+              <div className="flex flex-col items-center justify-center gap-3 py-2 text-center">
+                <div className="relative bg-white/95 rounded-2xl px-4 py-3 shadow-md text-sm font-semibold text-[#c98a3c]">
+                  <TriangleAlert size={15} className="inline mr-1 -mt-0.5" />
+                  {weather.code === "KMA_KEY_MISSING"
+                    ? "기상청 API 키가 아직 없어요"
+                    : weather.code === "OUT_OF_COVERAGE"
+                      ? "여긴 한반도 밖이에요! 🇰🇷"
+                      : "날씨를 불러오지 못했어요"}
+                  <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45" />
+                </div>
+                <WeatherBunny kind="cloud" size={140} />
+                {weather.code === "KMA_KEY_MISSING" ? (
+                  <p className="text-sm text-[#526585] max-w-[280px]">
+                    공공데이터포털 단기예보 키를
+                    <code className="mx-1 px-1.5 py-0.5 bg-[#eef2f8] rounded text-xs">
+                      KMA_SERVICE_KEY
+                    </code>
+                    에 설정해주세요.
+                  </p>
+                ) : weather.code === "OTHER" ? (
+                  <button
+                    onClick={refreshWeather}
+                    className="px-6 py-2.5 bg-white rounded-full text-sm font-bold text-[#5b8def] shadow-md transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none cursor-pointer"
+                  >
+                    다시 시도
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            {data && condition && (
+              <div className="relative">
+                <p className="text-xs text-[#526585] font-medium flex items-center gap-1">
+                  <MapPin size={12} className="text-[#f487a8]" />
+                  <span className="font-bold text-[#3d3652]">
+                    {data.place ?? "현재 위치"}
+                  </span>
+                  · 기상청 실황
+                </p>
+
+                {/* 말풍선 */}
+                <div className="relative mt-3 bg-white/95 rounded-2xl px-4 py-3 shadow-md text-sm font-bold w-fit max-w-full text-[#3d3652] border border-white/80">
+                  {speechOf(data)}
+                  <div className="absolute -bottom-1.5 left-8 sm:left-12 w-3 h-3 bg-white border-r border-b border-white/80 rotate-45" />
+                </div>
+
+                {/* 온도 + 토끼 */}
+                <div className="flex items-center justify-between mt-1">
+                  <div className="shrink-0">
+                    <p className="text-[64px] leading-none font-extrabold mt-4 tracking-tighter">
+                      {data.current.temp !== null ? `${Math.round(data.current.temp)}°` : "--°"}
+                    </p>
+                    <p className={`mt-2 text-lg font-bold ${condition.cls}`}>{condition.label}</p>
+                  </div>
+                  <WeatherBunny kind={bunnyKind} size={160} />
+                </div>
+
+                {/* 지표 칩 */}
+                <div className="flex gap-2 mt-3 flex-wrap text-xs font-semibold text-[#526585]">
                   <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
-                    <Umbrella size={13} className="text-[#5b8def] metric-wiggle" />
-                    시간당{" "}
+                    <Droplets size={13} className="text-[#5b8def] metric-bob" />
+                    습도{" "}
                     <b className="metric-shimmer">
-                      {/* 실황 강수량은 숫자만 옴 → 단위 보정 */}
-                      {/^[\d.]+$/.test(data.current.rn1)
-                        ? `${data.current.rn1}mm`
-                        : data.current.rn1}
+                      {data.current.humidity !== null ? `${data.current.humidity}%` : "--"}
                     </b>
                   </span>
-                )}
-              </div>
-
-              {/* 시간별 예보 */}
-              <div className="grid grid-cols-6 gap-1.5 mt-4">
-                {data.hourly.slice(0, 6).map((h) => {
-                  const c = conditionOf(h.pty, h.sky, h.lgt);
-                  return (
-                    <div
-                      key={`${h.date}${h.time}`}
-                      className="flex flex-col items-center gap-1.5 py-2.5 rounded-2xl bg-white/60 shadow-sm"
-                    >
-                      <span className="text-[11px] font-semibold text-[#8a97b3]">
-                        {Number(h.time.slice(0, 2))}시
-                      </span>
-                      <c.Icon size={18} className={c.cls} strokeWidth={2} />
-                      <span className="text-xs font-bold text-[#3d3652]">
-                        {h.temp !== null ? `${Math.round(h.temp)}°` : "--"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 비구름 지도 열기 */}
-              <button
-                onClick={() => setShowCloudMap(true)}
-                className="w-full mt-4 py-3 bg-white/80 hover:bg-white text-[#5b8def] rounded-full font-bold text-sm shadow-sm transition active:scale-[0.98]"
-              >
-                비구름 지도 보기 🌧️
-              </button>
-
-              {/* 관심 지역 추가 버튼 */}
-              {isSubscribed && data.place && !savedLocations.some(l => l.name === data.place) && (
-                <button
-                  onClick={addSavedLocation}
-                  disabled={isSavingLoc}
-                  className="w-full mt-2 py-3 bg-white/50 hover:bg-white text-[#8a97b3] hover:text-[#5b8def] rounded-full font-bold text-sm transition active:scale-[0.98]"
-                >
-                  {isSavingLoc ? "저장 중..." : "관심 지역으로 추가하기 ⭐"}
-                </button>
-              )}
-
-              <p className="text-[11px] text-[#9aa7c0] mt-3 text-right font-medium">
-                {new Date(data.updatedAt).toLocaleTimeString("ko-KR", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}{" "}
-                업데이트 · 자료: 기상청
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* ------------------------------------------------ 푸시 알림 카드 */}
-        <section className="bg-white/70 backdrop-blur-xl border border-white/80 rounded-[32px] p-6 flex flex-col gap-4 shadow-xl shadow-[#8aa3c4]/20">
-          <div className="flex items-center gap-3">
-            <div
-              className={`p-3 rounded-2xl ${isSubscribed ? "bg-[#e8f8ef]" : "bg-[#ffe9f0]"}`}
-            >
-              {isSubscribed ? (
-                <BellRing className="text-[#2e9e63]" size={24} />
-              ) : (
-                <BellOff className="text-[#f487a8]" size={24} />
-              )}
-            </div>
-            <div className="flex-1">
-              <h3 className="font-extrabold text-lg flex items-center gap-2">
-                비 알림
-                {isSubscribed && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#e8f8ef] text-[#2e9e63]">
-                    지켜보는 중 👀
+                  <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
+                    <Wind size={13} className="text-[#5eb8b0] metric-sway" />
+                    바람{" "}
+                    <b className="metric-shimmer">
+                      {data.current.windSpeed !== null ? `${data.current.windSpeed}m/s` : "--"}
+                    </b>
                   </span>
+                  {data.current.pty > 0 && (
+                    <span className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1.5 shadow-sm">
+                      <Umbrella size={13} className="text-[#5b8def] metric-wiggle" />
+                      시간당{" "}
+                      <b className="metric-shimmer">
+                        {/* 실황 강수량은 숫자만 옴 → 단위 보정 */}
+                        {/^[\d.]+$/.test(data.current.rn1)
+                          ? `${data.current.rn1}mm`
+                          : data.current.rn1}
+                      </b>
+                    </span>
+                  )}
+                </div>
+
+                {/* 시간별 예보 */}
+                <div className="grid grid-cols-6 gap-1.5 mt-4">
+                  {data.hourly.slice(0, 6).map((h) => {
+                    const c = conditionOf(h.pty, h.sky, h.lgt);
+                    return (
+                      <div
+                        key={`${h.date}${h.time}`}
+                        className="flex flex-col items-center gap-1.5 py-2.5 rounded-2xl bg-white/60 shadow-sm"
+                      >
+                        <span className="text-[11px] font-semibold text-[#526585]">
+                          {Number(h.time.slice(0, 2))}시
+                        </span>
+                        <c.Icon size={18} className={c.cls} strokeWidth={2} />
+                        <span className="text-xs font-bold text-[#3d3652]">
+                          {h.temp !== null ? `${Math.round(h.temp)}°` : "--"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 비구름 지도 열기 */}
+                <button
+                  onClick={() => setShowCloudMap(true)}
+                  className="w-full mt-4 py-3 bg-white/80 hover:bg-white text-[#5b8def] rounded-full font-bold text-sm shadow-sm transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none cursor-pointer"
+                >
+                  비구름 지도 보기 🌧️
+                </button>
+
+                {/* 관심 지역 추가 버튼 */}
+                {isSubscribed && data.place && !savedLocations.some(l => l.name === data.place) && (
+                  <button
+                    onClick={addSavedLocation}
+                    disabled={isSavingLoc}
+                    className="w-full mt-2 py-3 bg-white/50 hover:bg-white text-[#526585] hover:text-[#5b8def] rounded-full font-bold text-sm transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none cursor-pointer"
+                  >
+                    {isSavingLoc ? "저장 중..." : "관심 지역으로 추가하기 ⭐"}
+                  </button>
                 )}
-              </h3>
-              <p className="text-sm text-[#6b7694]">
-                {isSubscribed
-                  ? "10분마다 하늘을 확인해요. 이동하면 새 위치 기준으로 알려드려요."
-                  : "앱이 꺼져 있어도 비 오기 1~2시간 전에 푸시로 알려드려요."}
-              </p>
+
+                <p className="text-[11px] text-[#526585] mt-3 text-right font-medium">
+                  {new Date(data.updatedAt).toLocaleTimeString("ko-KR", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}{" "}
+                  업데이트 · 자료: 기상청
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* ------------------------------------------------ 푸시 알림 카드 */}
+          <section className="bg-white/70 backdrop-blur-xl border border-white/80 rounded-[32px] p-6 flex flex-col gap-4 shadow-xl shadow-[#8aa3c4]/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`p-2.5 rounded-2xl ${
+                    isSubscribed ? "bg-[#e8f8ef] text-[#2e9e63]" : "bg-[#f2f6fc] text-[#526585]"
+                  }`}
+                >
+                  {isSubscribed ? <BellRing size={20} /> : <BellOff size={20} />}
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base">비 오기 전 알림</h3>
+                  <p className="text-xs text-[#526585]">
+                    {isSubscribed ? "1~2시간 전에 알려드려요" : "비 소식을 미리 받아보세요"}
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-bold ${
+                  isSubscribed ? "bg-[#2e9e63] text-white" : "bg-[#526585]/20 text-[#526585]"
+                }`}
+              >
+                {isSubscribed ? "켜짐" : "꺼짐"}
+              </span>
             </div>
-          </div>
 
-          {inAppBrowser && (
-            <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
-              카카오톡·인스타 같은 <b>인앱 브라우저</b>에서는 알림을 받을 수 없어요. 오른쪽 위
-              메뉴에서 <b>&ldquo;Safari로 열기&rdquo;</b>(아이폰) 또는{" "}
-              <b>&ldquo;다른 브라우저로 열기&rdquo;</b>(안드로이드)를 눌러주세요.
-            </p>
-          )}
-          {!inAppBrowser && iosTooOld && (
-            <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
-              아이폰 알림은 <b>iOS 16.4 이상</b>부터 지원돼요. 설정 → 일반 → 소프트웨어
-              업데이트 후 다시 시도해주세요.
-            </p>
-          )}
-          {!inAppBrowser && !iosTooOld && pushSupport === "unsupported" && (
-            <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
-              이 브라우저는 푸시 알림을 지원하지 않아요.
-            </p>
-          )}
-          {pushSupport === "dev" && (
-            <p className="text-sm text-[#8a97b3] bg-[#f2f5fa] rounded-2xl px-4 py-3">
-              개발 모드에서는 서비스워커가 꺼져 있어요. 프로덕션 빌드(
-              <code className="text-xs">npm run build && npm start</code>)에서 테스트하세요.
-            </p>
-          )}
-          {pushSupport === "ok" && !inAppBrowser && !iosTooOld && iosNeedsInstall && (
-            <p className="text-sm font-medium text-[#c98a3c] bg-[#fff6e6] rounded-2xl px-4 py-3">
-              아이폰은 <b>홈 화면에 추가한 앱에서만</b> 알림을 받을 수 있어요. 아래 안내를 따라
-              먼저 설치해주세요.
-            </p>
-          )}
+            {/* 관심 지역 관리 (구독 중일 때만) */}
+            {isSubscribed && (
+              <div className="pt-2 border-t border-[#dfe8f2] flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#526585]">
+                    함께 지켜보는 지역 ({savedLocations.length}/5)
+                  </span>
+                  <span className="text-[11px] text-[#526585]">
+                    이곳들에 비가 와도 알려드려요
+                  </span>
+                </div>
 
-          {pushSupport === "ok" &&
-            !inAppBrowser &&
-            !iosTooOld &&
-            !iosNeedsInstall &&
-            (isSubscribed ? (
-              <div className="flex flex-col gap-2">
-                {savedLocations.length > 0 && (
-                  <div className="bg-white/60 rounded-2xl p-4 mb-2 shadow-sm border border-white/80">
-                    <h4 className="text-sm font-bold text-[#5a6b8c] mb-3 flex items-center gap-1">
-                      <MapPin size={14} className="text-[#f487a8]" /> 나의 관심 지역
-                    </h4>
-                    <div className="flex flex-col gap-2">
-                      {savedLocations.map(loc => (
-                        <div key={loc.id} className="flex items-center justify-between gap-2 bg-white rounded-xl px-3 py-2.5 shadow-sm border border-black/5">
-                          <span className="text-sm font-bold text-[#3d3652] flex-1 truncate">{loc.name}</span>
-                          {/* 출퇴근 역할 지정 — 🏠 집 / 🏢 직장 */}
-                          <div className="flex items-center gap-1">
+                {savedLocations.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    {savedLocations.map((loc) => {
+                      const isHome = loc.role === "home";
+                      const isWork = loc.role === "work";
+                      return (
+                        <div
+                          key={loc.id}
+                          className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs transition ${
+                            isHome
+                              ? "bg-[#eef5ff] border border-[#5b8def]/30"
+                              : isWork
+                                ? "bg-[#fcf3ea] border border-[#eab54a]/40"
+                                : "bg-white/80"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <MapPin
+                              size={12}
+                              className={
+                                isHome
+                                  ? "text-[#5b8def] shrink-0"
+                                  : isWork
+                                    ? "text-[#eab54a] shrink-0"
+                                    : "text-[#526585] shrink-0"
+                              }
+                            />
+                            <span className="font-semibold truncate text-[#3d3652]">
+                              {loc.name}
+                            </span>
+                            {loc.role && (
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                  isHome
+                                    ? "bg-[#5b8def] text-white"
+                                    : "bg-[#eab54a] text-white"
+                                }`}
+                              >
+                                {isHome ? "🏠 집" : "🏢 직장"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
                             <button
+                              type="button"
                               onClick={() => setLocationRole(loc.id, "home")}
-                              disabled={isSavingLoc}
-                              aria-label={`${loc.name}을 집으로 지정`}
-                              className={`px-1.5 py-1 rounded-lg text-sm transition ${
-                                loc.role === "home"
-                                  ? "bg-[#e3edff] ring-2 ring-[#5b8def]"
-                                  : "bg-[#f2f6fc] opacity-45 hover:opacity-100"
+                              title="집으로 지정 (통근 브리핑 출발지)"
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition focus-visible:ring-1 focus-visible:ring-blue-400 cursor-pointer ${
+                                isHome
+                                  ? "bg-[#5b8def] text-white"
+                                  : "bg-white/80 text-[#526585] hover:bg-white"
                               }`}
                             >
-                              🏠
+                              집
                             </button>
                             <button
+                              type="button"
                               onClick={() => setLocationRole(loc.id, "work")}
-                              disabled={isSavingLoc}
-                              aria-label={`${loc.name}을 직장으로 지정`}
-                              className={`px-1.5 py-1 rounded-lg text-sm transition ${
-                                loc.role === "work"
-                                  ? "bg-[#fff1dd] ring-2 ring-[#e8a13c]"
-                                  : "bg-[#f2f6fc] opacity-45 hover:opacity-100"
+                              title="직장으로 지정 (통근 브리핑 도착지)"
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition focus-visible:ring-1 focus-visible:ring-blue-400 cursor-pointer ${
+                                isWork
+                                  ? "bg-[#eab54a] text-white"
+                                  : "bg-white/80 text-[#526585] hover:bg-white"
                               }`}
                             >
-                              🏢
+                              직장
+                            </button>
+                            <button
+                              onClick={() => removeSavedLocation(loc.id)}
+                              className="p-1 text-[#526585] hover:text-[#e2647c] transition ml-0.5 focus-visible:ring-1 focus-visible:ring-red-400 cursor-pointer"
+                              title="삭제"
+                            >
+                              <X size={13} />
                             </button>
                           </div>
-                          <button
-                            onClick={() => removeSavedLocation(loc.id)}
-                            disabled={isSavingLoc}
-                            className="p-1.5 text-[#9aa7c0] hover:text-[#e2647c] bg-[#f2f6fc] hover:bg-[#ffe9ec] rounded-lg transition"
-                          >
-                            <X size={14} strokeWidth={3} />
-                          </button>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
+                ) : (
+                  <p className="text-xs text-[#526585] text-center py-2 bg-white/40 rounded-xl">
+                    아직 추가된 지역이 없어요.
+                    <br />
+                    다른 곳에서 날씨를 조회한 뒤 &apos;관심 지역으로 추가&apos;를 눌러보세요!
+                  </p>
                 )}
-                {/* 출퇴근 브리핑 설정 */}
-                <div className="bg-white/60 rounded-2xl p-4 mb-2 shadow-sm border border-white/80">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold text-[#5a6b8c] flex items-center gap-1.5">
-                      🧳 출퇴근 브리핑
-                      {commuteCfg.enabled && workLoc && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#e8f8ef] text-[#2e9e63]">
-                          매일 아침 {commuteCfg.briefingHour}시
-                        </span>
-                      )}
-                    </h4>
-                    {workLoc && (
-                      <button
-                        onClick={() => updateCommute({ enabled: !commuteCfg.enabled })}
-                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition active:scale-95 ${
-                          commuteCfg.enabled
-                            ? "bg-[#ffe9ec] text-[#e2647c]"
-                            : "bg-[#5b8def] text-white shadow-sm"
-                        }`}
+              </div>
+            )}
+
+            {/* 출퇴근 브리핑 설정 (Phase 1) */}
+            {isSubscribed && (
+              <div className="pt-2 border-t border-[#dfe8f2] flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#526585]">
+                    출퇴근 날씨 브리핑
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateCommute({
+                        enabled: !commuteCfg.enabled,
+                      })
+                    }
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold transition focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer ${
+                      commuteCfg.enabled
+                        ? "bg-[#5b8def] text-white"
+                        : "bg-[#526585]/20 text-[#526585]"
+                    }`}
+                  >
+                    {commuteCfg.enabled ? "켜짐" : "꺼짐"}
+                  </button>
+                </div>
+
+                {!workLoc && (
+                  <p className="text-[11px] text-[#eab54a] bg-[#fdf8ee] p-2.5 rounded-xl">
+                    💡 위 관심 지역에서 한 곳을 <b>&apos;직장&apos;</b>으로 지정해야 출퇴근
+                    브리핑이 동작해요. (집 미지정시 현재 위치가 집이 돼요)
+                  </p>
+                )}
+
+                {commuteCfg.enabled && (
+                  <div className="flex flex-col gap-2 bg-white/50 p-3 rounded-2xl text-xs">
+                    {/* 브리핑 발송 시각 */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#526585] font-medium">아침 브리핑 시각</span>
+                      <select
+                        value={commuteCfg.briefingHour ?? 7}
+                        onChange={(e) =>
+                          updateCommute({
+                            briefingHour: Number(e.target.value),
+                          })
+                        }
+                        className="bg-white border border-[#dfe8f2] rounded-lg px-2 py-1 font-semibold text-[#3d3652] focus-visible:ring-2 focus-visible:ring-blue-400"
                       >
-                        {commuteCfg.enabled ? "끄기" : "켜기"}
+                        {[6, 7, 8, 9].map((h) => (
+                          <option key={h} value={h}>
+                            오전 {h}시
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 발송 요일 */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#526585] font-medium">발송 요일</span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateCommute({
+                              days: [1, 2, 3, 4, 5],
+                            })
+                          }
+                          className={`px-2 py-0.5 rounded text-[11px] font-semibold transition focus-visible:ring-1 focus-visible:ring-blue-400 cursor-pointer ${
+                            commuteCfg.days?.length === 5
+                              ? "bg-[#5b8def] text-white"
+                              : "bg-white text-[#526585]"
+                          }`}
+                        >
+                          평일
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateCommute({
+                              days: [0, 1, 2, 3, 4, 5, 6],
+                            })
+                          }
+                          className={`px-2 py-0.5 rounded text-[11px] font-semibold transition focus-visible:ring-1 focus-visible:ring-blue-400 cursor-pointer ${
+                            commuteCfg.days?.length === 7
+                              ? "bg-[#5b8def] text-white"
+                              : "bg-white text-[#526585]"
+                          }`}
+                        >
+                          매일
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 출근 / 퇴근 시간대 */}
+                    <div className="flex items-center justify-between pt-1 border-t border-white/80">
+                      <span className="text-[#526585] font-medium">출근 이동 시간</span>
+                      <span className="font-semibold text-[#3d3652]">
+                        {commuteCfg.morning?.[0] ?? 7}시 ~ {commuteCfg.morning?.[1] ?? 9}시
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#526585] font-medium">퇴근 이동 시간</span>
+                      <span className="font-semibold text-[#3d3652]">
+                        {commuteCfg.evening?.[0] ?? 18}시 ~ {commuteCfg.evening?.[1] ?? 20}시
+                      </span>
+                    </div>
+
+                    {/* 맑은 날도 브리핑 여부 */}
+                    <label className="flex items-center gap-2 pt-1 border-t border-white/80 text-[11px] text-[#526585] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(commuteCfg.briefingAlways)}
+                        onChange={(e) =>
+                          updateCommute({
+                            briefingAlways: e.target.checked,
+                          })
+                        }
+                        className="rounded accent-[#5b8def]"
+                      />
+                      비 소식이 없어도 &apos;비 안 와요&apos; 브리핑 받기
+                    </label>
+
+                    {/* 통근 경로 타임라인 모달 열기 */}
+                    {homeSpot && workLoc && (
+                      <button
+                        type="button"
+                        onClick={() => setShowRouteTimeline(true)}
+                        className="w-full mt-1 py-2 bg-white/90 hover:bg-white text-[#5b8def] rounded-xl font-bold text-xs shadow-sm transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+                      >
+                        통근 경로 날씨 보기 🛣️
                       </button>
                     )}
                   </div>
-
-                  {!workLoc ? (
-                    <p className="text-xs font-medium text-[#8a97b3] mt-2 leading-relaxed">
-                      관심 지역 옆 <b>🏢</b>를 눌러 직장을 지정하면, 매일 아침{" "}
-                      <b>출근길+퇴근길 우산 브리핑</b>을 받아요.
-                      {savedLocations.length === 0 &&
-                        " 먼저 직장 위치에서 '관심 지역으로 추가'를 눌러주세요."}
-                    </p>
-                  ) : commuteCfg.enabled ? (
-                    <div className="mt-3 flex flex-col gap-2.5">
-                      <p className="text-xs font-bold text-[#5a6b8c]">
-                        🏠 {homeLoc?.name ?? "현재 위치"}{" "}
-                        <span className="text-[#9aa7c0]">↔</span> 🏢 {workLoc.name}
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-[#5a6b8c]">
-                        <label className="flex flex-col gap-1">
-                          브리핑 시각
-                          <select
-                            value={commuteCfg.briefingHour}
-                            onChange={(e) => updateCommute({ briefingHour: +e.target.value })}
-                            className="bg-white rounded-lg px-2 py-1.5 border border-black/5 font-bold text-[#3d3652]"
-                          >
-                            {[5, 6, 7, 8, 9].map((h) => (
-                              <option key={h} value={h}>
-                                오전 {h}시
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          통근 요일
-                          <select
-                            value={commuteCfg.days.length >= 7 ? "all" : "weekday"}
-                            onChange={(e) =>
-                              updateCommute({
-                                days:
-                                  e.target.value === "all"
-                                    ? [0, 1, 2, 3, 4, 5, 6]
-                                    : [1, 2, 3, 4, 5],
-                              })
-                            }
-                            className="bg-white rounded-lg px-2 py-1.5 border border-black/5 font-bold text-[#3d3652]"
-                          >
-                            <option value="weekday">평일만</option>
-                            <option value="all">매일</option>
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          출근 시간대
-                          <div className="flex items-center gap-1">
-                            <select
-                              value={commuteCfg.morning[0]}
-                              onChange={(e) =>
-                                updateCommute({
-                                  morning: [+e.target.value, commuteCfg.morning[1]],
-                                })
-                              }
-                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
-                            >
-                              {[5, 6, 7, 8, 9, 10, 11].map((h) => (
-                                <option key={h} value={h}>
-                                  {h}시
-                                </option>
-                              ))}
-                            </select>
-                            <span className="text-[#9aa7c0]">~</span>
-                            <select
-                              value={commuteCfg.morning[1]}
-                              onChange={(e) =>
-                                updateCommute({
-                                  morning: [commuteCfg.morning[0], +e.target.value],
-                                })
-                              }
-                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
-                            >
-                              {[6, 7, 8, 9, 10, 11, 12, 13].map((h) => (
-                                <option key={h} value={h}>
-                                  {h}시
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          퇴근 시간대
-                          <div className="flex items-center gap-1">
-                            <select
-                              value={commuteCfg.evening[0]}
-                              onChange={(e) =>
-                                updateCommute({
-                                  evening: [+e.target.value, commuteCfg.evening[1]],
-                                })
-                              }
-                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
-                            >
-                              {[15, 16, 17, 18, 19, 20, 21, 22].map((h) => (
-                                <option key={h} value={h}>
-                                  {h}시
-                                </option>
-                              ))}
-                            </select>
-                            <span className="text-[#9aa7c0]">~</span>
-                            <select
-                              value={commuteCfg.evening[1]}
-                              onChange={(e) =>
-                                updateCommute({
-                                  evening: [commuteCfg.evening[0], +e.target.value],
-                                })
-                              }
-                              className="flex-1 bg-white rounded-lg px-1.5 py-1.5 border border-black/5 font-bold text-[#3d3652]"
-                            >
-                              {[16, 17, 18, 19, 20, 21, 22, 23].map((h) => (
-                                <option key={h} value={h}>
-                                  {h}시
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </label>
-                      </div>
-                      <label className="flex items-center gap-2 text-xs font-semibold text-[#5a6b8c]">
-                        <input
-                          type="checkbox"
-                          checked={commuteCfg.briefingAlways}
-                          onChange={(e) => updateCommute({ briefingAlways: e.target.checked })}
-                          className="accent-[#5b8def] w-3.5 h-3.5"
-                        />
-                        비 소식 없어도 매일 브리핑 받기
-                      </label>
-                    </div>
-                  ) : (
-                    <p className="text-xs font-medium text-[#8a97b3] mt-2 leading-relaxed">
-                      켜면 매일 아침, 출근길과 퇴근길(🏠 {homeLoc?.name ?? "현재 위치"} ↔ 🏢{" "}
-                      {workLoc.name})의 우산 여부를 미리 알려드려요.
-                    </p>
-                  )}
-
-                  {/* 통근 경로 날씨 — 직장이 지정돼 있으면 브리핑 on/off와 무관하게 제공 */}
-                  {homeSpot && workLoc && (
-                    <button
-                      onClick={() => setShowRouteTimeline(true)}
-                      className="w-full mt-3 py-2.5 bg-white/85 hover:bg-white text-[#e8734d] rounded-full font-bold text-xs shadow-sm transition active:scale-[0.98]"
-                    >
-                      통근 경로 날씨 보기 🛣️
-                    </button>
-                  )}
-                </div>
-
-                <button
-                  onClick={sendTestPush}
-                  disabled={isSubscribing}
-                  className="w-full py-3 bg-white/80 hover:bg-white text-[#5b8def] rounded-full font-bold text-sm shadow-sm transition active:scale-[0.98]"
-                >
-                  {isSubscribing ? "처리 중..." : "테스트 알림 보내기 ✈️"}
-                </button>
-                <button
-                  onClick={unsubscribeFromPush}
-                  disabled={isSubscribing}
-                  className="w-full py-3 bg-[#ffe9ec] hover:bg-[#ffdde2] text-[#e2647c] rounded-full font-bold text-sm transition active:scale-[0.98]"
-                >
-                  알림 끄기
-                </button>
+                )}
               </div>
-            ) : (
-              <button
-                onClick={subscribeToPush}
-                disabled={isSubscribing || !location}
-                className="w-full py-3.5 bg-[#5b8def] hover:bg-[#4a7de6] disabled:opacity-40 text-white rounded-full font-bold shadow-lg shadow-[#5b8def]/30 transition active:scale-[0.98]"
-              >
-                {isSubscribing
-                  ? "설정 중..."
-                  : location
-                    ? "비 알림 켜기 🔔"
-                    : "먼저 위치를 설정해주세요"}
-              </button>
-            ))}
-        </section>
-
-        {/* ------------------------------------------------ 상태 점검 카드 */}
-        <DiagnosticsCard
-          pushEnv={pushEnv}
-          inAppBrowser={inAppBrowser}
-          isIOS={isIOS}
-          iosTooOld={iosTooOld}
-          isStandalone={isStandalone}
-          hasLocation={Boolean(location)}
-          weatherReady={weather.status === "ready"}
-          isSubscribed={isSubscribed}
-        />
-
-        {/* ------------------------------------------------ 설치 안내 카드 */}
-        {!isStandalone && (
-          <section className="bg-white/70 backdrop-blur-xl border border-white/80 rounded-[32px] p-6 flex flex-col gap-4 shadow-xl shadow-[#8aa3c4]/20">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-[#e3edff] rounded-2xl">
-                <Download className="text-[#5b8def]" size={24} />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-lg">홈 화면에 추가</h3>
-                <p className="text-sm text-[#6b7694]">진짜 앱처럼 아이콘으로 바로 열어요.</p>
-              </div>
-            </div>
-
-            {inAppBrowser ? (
-              <p className="text-sm font-medium text-[#5a6b8c] bg-[#f2f6fc] rounded-2xl p-4">
-                지금은 <b>인앱 브라우저</b>라 설치가 안 돼요. 오른쪽 위 메뉴(⋮ 또는 공유)에서{" "}
-                <b>&ldquo;Safari로 열기&rdquo;</b>(아이폰) /{" "}
-                <b>&ldquo;다른 브라우저로 열기&rdquo;</b>(안드로이드)를 누른 뒤 설치해주세요.
-              </p>
-            ) : isIOS ? (
-              <ol className="text-sm font-medium text-[#5a6b8c] space-y-2 bg-[#f2f6fc] rounded-2xl p-4">
-                <li className="flex items-center gap-2">
-                  <span className="text-[#9aa7c0]">1.</span> Safari 하단의{" "}
-                  <Share size={15} className="inline text-[#5b8def]" /> <b>공유</b> 버튼 탭
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className="text-[#9aa7c0]">2.</span>
-                  <PlusSquare size={15} className="inline text-[#5b8def]" />
-                  <b>홈 화면에 추가</b> 선택
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className="text-[#9aa7c0]">3.</span> 홈 화면 아이콘으로 열고 알림 켜기 ✅
-                </li>
-              </ol>
-            ) : installEvent ? (
-              <button
-                onClick={() => installEvent.prompt()}
-                className="w-full py-3.5 bg-[#5eb8b0] hover:bg-[#4daaa2] text-white rounded-full font-bold shadow-lg shadow-[#5eb8b0]/30 transition active:scale-[0.98]"
-              >
-                앱 설치하기 📲
-              </button>
-            ) : (
-              <p className="text-sm font-medium text-[#5a6b8c] bg-[#f2f6fc] rounded-2xl p-4">
-                Chrome 메뉴(⋮)에서 <b>&ldquo;홈 화면에 추가&rdquo;</b> 또는{" "}
-                <b>&ldquo;앱 설치&rdquo;</b>를 선택하세요.
-              </p>
             )}
+
+            {/* 수신 기기 상태 점검 & 테스트 (구독 중일 때만) */}
+            {isSubscribed && (
+              <div className="pt-2 border-t border-[#dfe8f2] flex flex-col gap-2 text-xs">
+                <div className="flex items-center justify-between text-[#526585]">
+                  <span>수신 기기 등록 상태</span>
+                  <span className="font-semibold text-[#2e9e63] flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-[#2e9e63] inline-block" />
+                    등록됨
+                  </span>
+                </div>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={sendTestPush}
+                    disabled={isSubscribing}
+                    className="flex-1 py-2.5 bg-white/80 hover:bg-white text-[#5b8def] rounded-2xl font-bold shadow-sm transition active:scale-[0.98] disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+                  >
+                    테스트 알림 받기 🔔
+                  </button>
+                  <button
+                    onClick={unsubscribeFromPush}
+                    disabled={isSubscribing}
+                    className="px-4 py-2.5 bg-white/50 hover:bg-[#ffe9ec] text-[#526585] hover:text-[#e2647c] rounded-2xl font-semibold transition active:scale-[0.98] disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-red-400 cursor-pointer"
+                  >
+                    알림 해제
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!isSubscribed &&
+              (permissionDenied ? (
+                <div className="p-4 bg-[#ffe9ec] rounded-2xl text-xs font-semibold text-[#e2647c] leading-relaxed">
+                  브라우저의 알림 권한이 차단되어 있어요. 주소창 왼쪽 자물쇠/설정 아이콘에서 알림을
+                  허용으로 바꾼 뒤 다시 시도해주세요.
+                </div>
+              ) : (
+                <button
+                  onClick={subscribeToPush}
+                  disabled={isSubscribing || !location}
+                  className="w-full py-3.5 bg-[#5b8def] hover:bg-[#4a7de6] disabled:opacity-40 text-white rounded-full font-bold shadow-lg shadow-[#5b8def]/30 transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+                >
+                  {isSubscribing
+                    ? "설정 중..."
+                    : location
+                      ? "비 알림 켜기 🔔"
+                      : "먼저 위치를 설정해주세요"}
+                </button>
+              ))}
           </section>
+
+          {/* ------------------------------------------------ 상태 점검 카드 */}
+          <ErrorBoundary name="DiagnosticsCard">
+            <DiagnosticsCard
+              pushEnv={swFailed ? "unsupported" : pushEnv}
+              inAppBrowser={inAppBrowser}
+              isIOS={isIOS}
+              iosTooOld={iosTooOld}
+              isStandalone={isStandalone}
+              hasLocation={Boolean(location)}
+              weatherReady={weather.status === "ready"}
+              isSubscribed={isSubscribed}
+            />
+          </ErrorBoundary>
+
+          {/* ------------------------------------------------ 설치 안내 카드 */}
+          {!isStandalone && (
+            <section className="bg-white/70 backdrop-blur-xl border border-white/80 rounded-[32px] p-6 flex flex-col gap-4 shadow-xl shadow-[#8aa3c4]/20">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-[#e3edff] rounded-2xl">
+                  <Download className="text-[#5b8def]" size={24} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-lg">홈 화면에 추가</h3>
+                  <p className="text-sm text-[#526585]">진짜 앱처럼 아이콘으로 바로 열어요.</p>
+                </div>
+              </div>
+
+              {inAppBrowser ? (
+                <p className="text-sm font-medium text-[#3d3652] bg-[#f2f6fc] rounded-2xl p-4">
+                  지금은 <b>인앱 브라우저</b>라 설치가 안 돼요. 오른쪽 위 메뉴(⋮ 또는 공유)에서{" "}
+                  <b>&ldquo;Safari로 열기&rdquo;</b>(아이폰) /{" "}
+                  <b>&ldquo;다른 브라우저로 열기&rdquo;</b>(안드로이드)를 누른 뒤 설치해주세요.
+                </p>
+              ) : isIOS ? (
+                <ol className="text-sm font-medium text-[#3d3652] space-y-2 bg-[#f2f6fc] rounded-2xl p-4">
+                  <li className="flex items-center gap-2">
+                    <span className="text-[#526585]">1.</span> Safari 하단의{" "}
+                    <Share size={15} className="inline text-[#5b8def]" /> <b>공유</b> 버튼 탭
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-[#526585]">2.</span>
+                    <PlusSquare size={15} className="inline text-[#5b8def]" />
+                    <b>홈 화면에 추가</b> 선택
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="text-[#526585]">3.</span> 홈 화면 아이콘으로 열고 알림 켜기 ✅
+                  </li>
+                </ol>
+              ) : installEvent ? (
+                <button
+                  onClick={() => installEvent.prompt()}
+                  className="w-full py-3.5 bg-[#5eb8b0] hover:bg-[#4daaa2] text-white rounded-full font-bold shadow-lg shadow-[#5eb8b0]/30 transition active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-teal-400 cursor-pointer"
+                >
+                  앱 설치하기 📲
+                </button>
+              ) : (
+                <p className="text-sm font-medium text-[#3d3652] bg-[#f2f6fc] rounded-2xl p-4">
+                  Chrome 메뉴(⋮)에서 <b>&ldquo;홈 화면에 추가&rdquo;</b> 또는{" "}
+                  <b>&ldquo;앱 설치&rdquo;</b>를 선택하세요.
+                </p>
+              )}
+            </section>
+          )}
+
+          <p className="text-center text-[11px] font-medium text-[#526585]">
+            기상청 초단기예보 기반 · 앱 사용 중 이동하면 위치 자동 반영
+            <br />
+            위치 정보는 알림 용도로만 사용됩니다
+          </p>
+        </div>
+
+        {/* 비구름 지도 모달 */}
+        {showCloudMap && location && (
+          <ErrorBoundary name="CloudMap">
+            <CloudMap
+              lat={location.lat}
+              lng={location.lng}
+              place={data?.place ?? null}
+              precip={data?.precip ?? null}
+              route={
+                homeSpot && workLoc
+                  ? {
+                      home: { lat: homeSpot.lat, lng: homeSpot.lng },
+                      work: { lat: workLoc.lat, lng: workLoc.lng },
+                    }
+                  : undefined
+              }
+              onClose={() => setShowCloudMap(false)}
+            />
+          </ErrorBoundary>
         )}
 
-        <p className="text-center text-[11px] font-medium text-[#7d8cab]/70">
-          기상청 초단기예보 기반 · 앱 사용 중 이동하면 위치 자동 반영
-          <br />
-          위치 정보는 알림 용도로만 사용됩니다
-        </p>
-      </div>
-
-      {/* 비구름 지도 모달 */}
-      {showCloudMap && location && (
-        <CloudMap
-          lat={location.lat}
-          lng={location.lng}
-          place={data?.place ?? null}
-          precip={data?.precip ?? null}
-          route={
-            homeSpot && workLoc
-              ? {
-                  home: { lat: homeSpot.lat, lng: homeSpot.lng },
-                  work: { lat: workLoc.lat, lng: workLoc.lng },
-                }
-              : undefined
-          }
-          onClose={() => setShowCloudMap(false)}
-        />
-      )}
-
-      {/* 통근 경로 타임라인 모달 */}
-      {showRouteTimeline && homeSpot && workLoc && (
-        <RouteTimeline
-          home={homeSpot}
-          work={{ name: workLoc.name, lat: workLoc.lat, lng: workLoc.lng }}
-          morning={commuteCfg.morning}
-          evening={commuteCfg.evening}
-          onClose={() => setShowRouteTimeline(false)}
-        />
-      )}
-    </main>
+        {/* 통근 경로 타임라인 모달 */}
+        {showRouteTimeline && homeSpot && workLoc && (
+          <ErrorBoundary name="RouteTimeline">
+            <RouteTimeline
+              home={homeSpot}
+              work={{ name: workLoc.name, lat: workLoc.lat, lng: workLoc.lng }}
+              morning={commuteCfg.morning}
+              evening={commuteCfg.evening}
+              onClose={() => setShowRouteTimeline(false)}
+            />
+          </ErrorBoundary>
+        )}
+      </main>
+    </div>
   );
 }

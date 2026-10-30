@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUsers, removeUser, subscriptionId } from "@/lib/db";
 import { getWebPush } from "@/lib/push";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Test push error:", error);
+    logger.error("TestPush", "Failed to deliver test push notification", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

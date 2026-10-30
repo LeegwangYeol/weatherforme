@@ -2,6 +2,7 @@
 // - DFS 5km 격자 (149×253), 남쪽(ny=1)부터 행 순서 — 검증 완료
 // - 10분 간격 갱신 발표(tmfc), 예보시각(tmef)은 정시 단위로 +1h~+6h
 import { latLngToGrid } from "./kma";
+import { cacheGet, cacheSet } from "./db";
 
 const VSRT_GRD_URL =
   "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-dfs_vsrt_grd";
@@ -42,13 +43,34 @@ async function fetchGrid(
   if (!key) throw new Error("KMA_APIHUB_KEY is not set");
 
   const url = `${VSRT_GRD_URL}?tmfc=${tmfc}&tmef=${tmef}&vars=${vars}&authKey=${encodeURIComponent(key)}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) return null;
-  const values = parseGrid(await res.text());
-  if (values.length !== DFS_NX * DFS_NY) return null;
-  // 발표 직후엔 껍데기(전부 -99)만 있을 수 있음 — 유효값 없으면 실패 처리
-  if (!values.some((v) => v > -90)) return null;
-  return values;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!res.ok) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 150));
+          continue;
+        }
+        return null;
+      }
+      const values = parseGrid(await res.text());
+      if (values.length !== DFS_NX * DFS_NY) return null;
+      // 발표 직후엔 껍데기(전부 -99)만 있을 수 있음 — 유효값 없으면 실패 처리
+      if (!values.some((v) => v > -90)) return null;
+      return values;
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 150));
+        continue;
+      }
+      return null;
+    }
+  }
+  return null;
 }
 
 export interface CloudFrame {
@@ -89,12 +111,21 @@ export async function getCloudMap(
   const center = latLngToGrid(lat, lng);
   const half = Math.floor(size / 2);
 
+  // 10분 간격 발표 자료이므로 동일 격자·창 크기에 대해 5분 캐시 적용 (API허브 과부하/타임아웃 방지)
+  const cacheKey = `wfm:cloudmap:${center.nx},${center.ny}:${size}`;
+  const cached = await cacheGet<CloudMapData>(cacheKey).catch(() => null);
+  if (cached && Array.isArray(cached.frames) && cached.frames.length > 0) {
+    return cached;
+  }
+
   // 유효한 tmfc 찾기 (+1h RN1 프레임이 존재하는 가장 최근 발표)
   let tmfc: string | null = null;
+  let firstRn1Grid: number[] | null = null;
   for (const candidate of tmfcCandidates()) {
     const grid = await fetchGrid(candidate, nextHourAfter(candidate, 1), "RN1");
     if (grid) {
       tmfc = candidate;
+      firstRn1Grid = grid;
       break;
     }
   }
@@ -141,13 +172,13 @@ export async function getCloudMap(
     return { rn1, pty };
   };
 
-  // +1h~+6h 프레임을 RN1·PTY 함께 조회
+  // +1h~+6h 프레임을 RN1·PTY 함께 조회 (+1h RN1은 탐색 단계 결과 재사용)
   const frames = (
     await Promise.all(
       [1, 2, 3, 4, 5, 6].map(async (h) => {
         const tmef = nextHourAfter(tmfc!, h);
         const [rn1grid, ptygrid] = await Promise.all([
-          fetchGrid(tmfc!, tmef, "RN1"),
+          h === 1 && firstRn1Grid ? Promise.resolve(firstRn1Grid) : fetchGrid(tmfc!, tmef, "RN1"),
           fetchGrid(tmfc!, tmef, "PTY"),
         ]);
         if (!rn1grid) return null;
@@ -159,7 +190,9 @@ export async function getCloudMap(
 
   if (frames.length === 0) return null;
 
-  return { tmfc, center, size, cellKm: 5, frames };
+  const result: CloudMapData = { tmfc, center, size, cellKm: 5, frames };
+  await cacheSet(cacheKey, result, 300).catch(() => {});
+  return result;
 }
 
 // tmfc 기준 h시간 뒤의 정시 tmef ("YYYYMMDDHH00")

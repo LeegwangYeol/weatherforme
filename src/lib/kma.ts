@@ -113,31 +113,40 @@ export function ultraSrtNcstBase(offsetHours = 0): { baseDate: string; baseTime:
 }
 
 // ---------------------------------------------------------------------------
-// API 호출
+// API 호출 (공공데이터포털 우선 + 기상청 API허브 자동 폴백 & 재시도)
 // ---------------------------------------------------------------------------
-function kmaAuth(): { base: string; authParam: string } | null {
-  // 단기예보는 공공데이터포털 키 우선 (검증된 경로), API허브 키는 폴백
-  // — API허브 키는 주로 레이더 등 다른 자료용 (lib/radar.ts)
+interface KmaAuthProvider {
+  name: string;
+  base: string;
+  authParam: string;
+}
+
+function kmaAuthList(): KmaAuthProvider[] {
+  const providers: KmaAuthProvider[] = [];
+  // 1순위: 공공데이터포털 키 (검증된 기본 경로)
   const dataKey = process.env.KMA_SERVICE_KEY;
   if (dataKey) {
     // 데이터포털 키는 인코딩/디코딩 두 형태로 제공됨 — '%'가 있으면 이미 인코딩된 키
-    return {
+    providers.push({
+      name: "data.go.kr",
       base: DATA_GO_KR_BASE,
       authParam: `serviceKey=${dataKey.includes("%") ? dataKey : encodeURIComponent(dataKey)}`,
-    };
+    });
   }
+  // 2순위(폴백): 기상청 API허브 키 — 공공데이터포털 일시 장애(undefined: unknown 등) 시 즉시 우회
   const hubKey = process.env.KMA_APIHUB_KEY;
   if (hubKey) {
-    return {
+    providers.push({
+      name: "apihub.kma.go.kr",
       base: APIHUB_BASE,
       authParam: `authKey=${encodeURIComponent(hubKey)}`,
-    };
+    });
   }
-  return null;
+  return providers;
 }
 
 export function isKmaConfigured(): boolean {
-  return kmaAuth() !== null;
+  return kmaAuthList().length > 0;
 }
 
 interface KmaItem {
@@ -150,27 +159,26 @@ interface KmaItem {
 
 const NO_DATA = "NO_DATA";
 
-async function callKma(
+async function callKmaWithProvider(
+  auth: KmaAuthProvider,
   operation: "getUltraSrtFcst" | "getUltraSrtNcst" | "getVilageFcst",
   params: Record<string, string>
 ): Promise<KmaItem[]> {
-  const auth = kmaAuth();
-  if (!auth) {
-    throw new Error("KMA API 키가 없습니다 (KMA_SERVICE_KEY 또는 KMA_APIHUB_KEY)");
-  }
-
   const qs = new URLSearchParams({ pageNo: "1", dataType: "JSON", ...params });
   const url = `${auth.base}/${operation}?${auth.authParam}&${qs.toString()}`;
 
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(8000),
+  });
   const text = await res.text();
 
   let json;
   try {
     json = JSON.parse(text);
   } catch {
-    // 데이터포털 키 오류 등은 XML/텍스트로 응답이 옴
-    throw new Error(`KMA non-JSON response (${res.status}): ${text.slice(0, 200)}`);
+    // 데이터포털 키 오류/게이트웨이 장애 등은 XML/텍스트로 응답이 옴
+    throw new Error(`KMA(${auth.name}) non-JSON response (${res.status}): ${text.slice(0, 200)}`);
   }
 
   // API허브 게이트웨이 오류 형태: {"result":{"status":401,"message":"..."}}
@@ -178,16 +186,57 @@ async function callKma(
     throw new Error(`KMA APIHub error ${json.result.status}: ${json.result.message}`);
   }
 
+  // 공공데이터포털 JSON 게이트웨이 오류 형태: {"cmmMsgHeader":{"errMsg":...,"returnReasonCode":...}}
+  if (json?.cmmMsgHeader) {
+    const hdr = json.cmmMsgHeader;
+    throw new Error(
+      `KMA(${auth.name}) gateway error ${hdr.returnReasonCode ?? "unknown"}: ${hdr.returnAuthMsg ?? hdr.errMsg ?? "gateway failure"}`
+    );
+  }
+
   const code = json?.response?.header?.resultCode;
   if (code === "03") throw new Error(NO_DATA);
   if (code !== "00") {
-    throw new Error(
-      `KMA API error ${code}: ${json?.response?.header?.resultMsg ?? "unknown"}`
-    );
+    const msg = json?.response?.header?.resultMsg ?? JSON.stringify(json).slice(0, 160);
+    throw new Error(`KMA(${auth.name}) API error ${code ?? `HTTP_${res.status}`}: ${msg}`);
   }
 
   const items = json?.response?.body?.items?.item;
   return Array.isArray(items) ? items : [];
+}
+
+async function callKma(
+  operation: "getUltraSrtFcst" | "getUltraSrtNcst" | "getVilageFcst",
+  params: Record<string, string>
+): Promise<KmaItem[]> {
+  const providers = kmaAuthList();
+  if (providers.length === 0) {
+    throw new Error("KMA API 키가 없습니다 (KMA_SERVICE_KEY 또는 KMA_APIHUB_KEY)");
+  }
+
+  let lastError: unknown = null;
+
+  for (const provider of providers) {
+    // 각 프로바이더당 최대 2회 시도 (일시적 게이트웨이 순단 대비)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await callKmaWithProvider(provider, operation, params);
+      } catch (e) {
+        // 발표 직후 데이터 미제공(NO_DATA)은 프로바이더 장애가 아니므로 즉시 상위(이전 발표시각 재시도)로 전달
+        if (e instanceof Error && e.message === NO_DATA) {
+          throw e;
+        }
+        lastError = e;
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`KMA API 호출 실패: ${String(lastError)}`);
 }
 
 // ---------------------------------------------------------------------------
