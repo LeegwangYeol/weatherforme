@@ -1,6 +1,6 @@
 # WeatherForMe ☔
 
-비 오기 1~2시간 전에 푸시로 알려주는 **내 위치 기반 우산 알리미 PWA**.
+비 오기 1~3시간 전에 푸시로 알려주는 **내 위치 기반 우산 알리미 PWA**.
 
 - **기상청 초단기예보**(공공데이터포털) 실시간 데이터 사용
 - 홈 화면에 설치하는 **앱 형태(PWA)** — 앱이 꺼져 있어도 푸시 수신
@@ -16,7 +16,7 @@
         │  Bearer CRON_SECRET
         ▼
 GET /api/cron/weather ──→ 기상청 초단기예보 (구독자 격자 단위로 1회 조회)
-        │                     └ 향후 2시간 내 비/눈/진눈깨비 감지
+        │                     └ 향후 3시간 내 비/눈/진눈깨비 감지
         ▼
 web-push (VAPID) ──→ 폰 알림 "☔ 곧 비가 와요 — 오후 3시부터..."
 
@@ -80,7 +80,7 @@ npm run dev                  # http://localhost:3000
 | `VAPID_SUBJECT` | 푸시 서비스 연락처 (`mailto:...`) |
 | `CRON_SECRET` | 크론 엔드포인트 인증 토큰 |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Upstash Redis (미설정시 인메모리 — 로컬 전용) |
-| `RAIN_LOOKAHEAD_HOURS` | (선택) 강수 감지 리드타임, 기본 2시간 |
+| `RAIN_LOOKAHEAD_HOURS` | (선택) 강수 감지 리드타임, 기본 3시간 |
 | `NOTIFY_COOLDOWN_HOURS` | (선택) 재알림 쿨다운, 기본 3시간 |
 
 ## 주요 코드

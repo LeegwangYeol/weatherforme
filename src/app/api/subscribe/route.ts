@@ -95,7 +95,7 @@ export async function POST(req: Request) {
         subscription,
         JSON.stringify({
           title: "알림 설정 완료! ☔",
-          body: "이제 비가 오기 1~2시간 전에 미리 알려드릴게요.",
+          body: "이제 비가 오기 1~3시간 전에 미리 알려드릴게요.",
         })
       )
       .catch((e) => logger.warn("Push", "Welcome push failed to send", { error: e, id }));
