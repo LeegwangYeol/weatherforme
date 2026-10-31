@@ -1055,7 +1055,7 @@ export default function Home() {
                 <div>
                   <h3 className="font-extrabold text-base">비 오기 전 알림</h3>
                   <p className="text-xs text-[#526585]">
-                    {isSubscribed ? "1~2시간 전에 알려드려요" : "비 소식을 미리 받아보세요"}
+                    {isSubscribed ? "1~3시간 전에 알려드려요" : "비 소식을 미리 받아보세요"}
                   </p>
                 </div>
               </div>
