@@ -67,10 +67,10 @@ async function handleCron(req: Request) {
   const force = searchParams.get("force");
   const now = Date.now();
 
-  // 중복 스케줄러(외부 10분 크론 + GitHub Actions) 동시 호출 방지 — 90초 이내 재호출은 즉시 생략하여 CPU 절약
+  // 중복 스케줄러(외부 5~10분 크론 + GitHub Actions) 과호출 방지 — 20분 이내 재호출은 L1 캐시에서 즉시 생략하여 CPU 절약
   if (!force) {
     const prevCron = await cacheGet<number>("wfm:lastCron").catch(() => null);
-    if (prevCron && now - prevCron < 90 * 1000) {
+    if (prevCron && now - prevCron < 20 * 60 * 1000) {
       return NextResponse.json({
         success: true,
         skipped: "RECENTLY_RAN",

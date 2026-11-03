@@ -113,7 +113,7 @@ export const removeUser = async (id: string) => {
 // L1(서버리스 인스턴스 메모리) + L2(Upstash Redis) 2계층 캐시로 CPU 및 네트워크 호출 최소화
 // ---------------------------------------------------------------------------
 const L1_MAX_ENTRIES = 250;
-const L1_MAX_TTL_MS = 10 * 60 * 1000; // L1 메모리는 최대 10분 유지 (데이터 신선도 보장)
+const L1_MAX_TTL_MS = 45 * 60 * 1000; // 기상청 초단기예보 1시간 주기에 맞춰 최대 45분 인메모리 유지
 
 function l1Get<T>(key: string): T | null {
   const entry = g.__wfmCache!.get(key);

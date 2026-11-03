@@ -8,9 +8,9 @@ name: weather-cron
 
 on:
   schedule:
-    # 명목상 5분 — GitHub 무료 스케줄러는 크게 지연/생략될 수 있어
-    # 신뢰 가능한 주기는 QStash/cron-job.org 등 외부 스케줄러 병행 권장 (README)
-    - cron: "*/5 * * * *"
+    # 기상청 초단기예보는 매시 45분에 1회 갱신되므로 매시 50분(1시간 주기)에 호출하여
+    # 기존 5분 주기(월 8,640회) 대비 호출 횟수와 Vercel CPU 사용량을 91.7%(월 720회) 절감
+    - cron: "50 * * * *"
   workflow_dispatch: {}
 
 jobs:

@@ -48,7 +48,13 @@ export default function RouteTimeline({
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    let inFlight = false;
+    let lastLoadedAt = 0;
+
+    const load = async (force = false) => {
+      if (inFlight) return;
+      if (!force && lastLoadedAt > 0 && Date.now() - lastLoadedAt < 5 * 60 * 1000) return;
+      inFlight = true;
       try {
         const qs = `aLat=${home.lat}&aLng=${home.lng}&bLat=${work.lat}&bLng=${work.lng}`;
         const res = await fetch(`/api/route-weather?${qs}`, {
@@ -60,20 +66,23 @@ export default function RouteTimeline({
         if (!res.ok) {
           setState((prev) => (prev.status === "ready" ? prev : { status: "error", code: json?.error ?? "OTHER" }));
         } else {
+          lastLoadedAt = Date.now();
           setState({ status: "ready", data: json });
         }
       } catch {
         if (!cancelled) {
           setState((prev) => (prev.status === "ready" ? prev : { status: "error", code: "OTHER" }));
         }
+      } finally {
+        inFlight = false;
       }
     };
 
-    void load();
+    void load(true);
 
     const onForeground = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      void load();
+      void load(false);
     };
 
     document.addEventListener("visibilitychange", onForeground);

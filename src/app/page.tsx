@@ -347,12 +347,12 @@ export default function Home() {
         lastFetchedCoordsRef.current.lng === loc.lng;
 
       // 1. 디바운스 / 스로틀링:
-      // 강제 요청(force)이 아니고, 좌표가 같으며, 기존 데이터가 정상(ready)이고 15초 이내면 재호출 생략
+      // 강제 요청(force)이 아니고, 좌표가 같으며, 기존 데이터가 정상(ready)이고 5분 이내면 재호출 생략 (기상청 실황/예보는 1시간 주기 갱신)
       if (
         !options?.force &&
         sameCoords &&
         weatherRef.current.status === "ready" &&
-        now - lastFetchedAtRef.current < 15000
+        now - lastFetchedAtRef.current < 5 * 60 * 1000
       ) {
         return;
       }
@@ -520,12 +520,12 @@ export default function Home() {
     window.addEventListener("pageshow", handleForeground);
     window.addEventListener("online", handleForeground);
 
-    // 앱 활성 상태일 때 5분 주기 자동 갱신
+    // 앱 활성 상태일 때 15분 주기 자동 갱신 (기상청 발표 주기에 맞춤)
     const interval = setInterval(() => {
       if (typeof document === "undefined" || document.visibilityState !== "hidden") {
         void fetchWeatherData(locationRef.current, { force: false });
       }
-    }, 5 * 60 * 1000);
+    }, 15 * 60 * 1000);
 
     return () => {
       document.removeEventListener("visibilitychange", handleForeground);

@@ -83,10 +83,16 @@ export default function CloudMap({
   const [playing, setPlaying] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // 데이터 로드
+  // 데이터 로드 (중복 탭 포커스 이벤트 및 5분 이내 재호출 스로틀링으로 서버 CPU 절약)
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    let inFlight = false;
+    let lastLoadedAt = 0;
+
+    const load = async (force = false) => {
+      if (inFlight) return;
+      if (!force && lastLoadedAt > 0 && Date.now() - lastLoadedAt < 5 * 60 * 1000) return;
+      inFlight = true;
       try {
         const res = await fetch(`/api/cloudmap?lat=${lat}&lng=${lng}`, {
           cache: "no-store",
@@ -97,20 +103,23 @@ export default function CloudMap({
         if (!res.ok) {
           setState((prev) => (prev.status === "ready" ? prev : { status: "error", code: json?.error ?? "OTHER" }));
         } else {
+          lastLoadedAt = Date.now();
           setState({ status: "ready", data: json });
         }
       } catch {
         if (!cancelled) {
           setState((prev) => (prev.status === "ready" ? prev : { status: "error", code: "OTHER" }));
         }
+      } finally {
+        inFlight = false;
       }
     };
 
-    void load();
+    void load(true);
 
     const onForeground = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      void load();
+      void load(false);
     };
 
     document.addEventListener("visibilitychange", onForeground);
