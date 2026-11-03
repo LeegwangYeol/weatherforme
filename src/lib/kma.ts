@@ -7,6 +7,28 @@
 // - 공공데이터포털(data.go.kr): serviceKey 파라미터 → KMA_SERVICE_KEY
 // - 기상청 API허브(apihub.kma.go.kr): authKey 파라미터 → KMA_APIHUB_KEY
 
+const gKma = globalThis as unknown as {
+  __wfmCache?: Map<string, { value: unknown; expiresAt: number }>;
+  __wfmCacheGet?: <T>(key: string) => Promise<T | null>;
+  __wfmCacheSet?: (key: string, value: unknown, ttlSeconds: number) => Promise<void>;
+};
+gKma.__wfmCache ??= new Map();
+
+async function cacheGet<T>(key: string): Promise<T | null> {
+  if (gKma.__wfmCacheGet) return gKma.__wfmCacheGet<T>(key);
+  const entry = gKma.__wfmCache!.get(key);
+  if (!entry || entry.expiresAt < Date.now()) return null;
+  return entry.value as T;
+}
+
+async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  if (gKma.__wfmCacheSet) {
+    await gKma.__wfmCacheSet(key, value, ttlSeconds);
+    return;
+  }
+  gKma.__wfmCache!.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+}
+
 const DATA_GO_KR_BASE =
   "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0";
 const APIHUB_BASE =
@@ -254,24 +276,33 @@ export interface HourlyForecast {
 }
 
 export async function getUltraSrtFcst(grid: Grid): Promise<HourlyForecast[]> {
+  const primaryBase = ultraSrtFcstBase();
+  const primaryCacheKey = `wfm:ufcst:${grid.nx},${grid.ny}:${primaryBase.baseDate}${primaryBase.baseTime}`;
+  const cached = await cacheGet<HourlyForecast[]>(primaryCacheKey).catch(() => null);
+  if (cached && cached.length > 0) return cached;
+
+  let usedBase = primaryBase;
   let items: KmaItem[];
   try {
-    const base = ultraSrtFcstBase();
     items = await callKma("getUltraSrtFcst", {
       numOfRows: "60",
-      base_date: base.baseDate,
-      base_time: base.baseTime,
+      base_date: primaryBase.baseDate,
+      base_time: primaryBase.baseTime,
       nx: String(grid.nx),
       ny: String(grid.ny),
     });
   } catch (e) {
     // 발표 직후 데이터 미제공 구간이면 한 시간 전 발표분으로 재시도
     if (!(e instanceof Error && e.message === NO_DATA)) throw e;
-    const base = ultraSrtFcstBase(1);
+    usedBase = ultraSrtFcstBase(1);
+    const fallbackCacheKey = `wfm:ufcst:${grid.nx},${grid.ny}:${usedBase.baseDate}${usedBase.baseTime}`;
+    const fallbackCached = await cacheGet<HourlyForecast[]>(fallbackCacheKey).catch(() => null);
+    if (fallbackCached && fallbackCached.length > 0) return fallbackCached;
+
     items = await callKma("getUltraSrtFcst", {
       numOfRows: "60",
-      base_date: base.baseDate,
-      base_time: base.baseTime,
+      base_date: usedBase.baseDate,
+      base_time: usedBase.baseTime,
       nx: String(grid.nx),
       ny: String(grid.ny),
     });
@@ -314,9 +345,16 @@ export async function getUltraSrtFcst(grid: Grid): Promise<HourlyForecast[]> {
     }
   }
 
-  return [...byHour.entries()]
+  const result = [...byHour.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, entry]) => entry);
+
+  if (result.length > 0) {
+    const finalKey = `wfm:ufcst:${grid.nx},${grid.ny}:${usedBase.baseDate}${usedBase.baseTime}`;
+    // 초단기예보는 1시간마다 발표되므로 해당 baseTime 키로 50분간 캐시 (한 시간 내 6번의 크론 중 5번은 캐시 히트)
+    await cacheSet(finalKey, result, 3000).catch(() => {});
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,23 +369,32 @@ export interface CurrentConditions {
 }
 
 export async function getUltraSrtNcst(grid: Grid): Promise<CurrentConditions> {
+  const primaryBase = ultraSrtNcstBase();
+  const primaryCacheKey = `wfm:uncst:${grid.nx},${grid.ny}:${primaryBase.baseDate}${primaryBase.baseTime}`;
+  const cached = await cacheGet<CurrentConditions>(primaryCacheKey).catch(() => null);
+  if (cached) return cached;
+
+  let usedBase = primaryBase;
   let items: KmaItem[];
   try {
-    const base = ultraSrtNcstBase();
     items = await callKma("getUltraSrtNcst", {
       numOfRows: "10",
-      base_date: base.baseDate,
-      base_time: base.baseTime,
+      base_date: primaryBase.baseDate,
+      base_time: primaryBase.baseTime,
       nx: String(grid.nx),
       ny: String(grid.ny),
     });
   } catch (e) {
     if (!(e instanceof Error && e.message === NO_DATA)) throw e;
-    const base = ultraSrtNcstBase(1);
+    usedBase = ultraSrtNcstBase(1);
+    const fallbackCacheKey = `wfm:uncst:${grid.nx},${grid.ny}:${usedBase.baseDate}${usedBase.baseTime}`;
+    const fallbackCached = await cacheGet<CurrentConditions>(fallbackCacheKey).catch(() => null);
+    if (fallbackCached) return fallbackCached;
+
     items = await callKma("getUltraSrtNcst", {
       numOfRows: "10",
-      base_date: base.baseDate,
-      base_time: base.baseTime,
+      base_date: usedBase.baseDate,
+      base_time: usedBase.baseTime,
       nx: String(grid.nx),
       ny: String(grid.ny),
     });
@@ -380,6 +427,9 @@ export async function getUltraSrtNcst(grid: Grid): Promise<CurrentConditions> {
         break;
     }
   }
+
+  const finalKey = `wfm:uncst:${grid.nx},${grid.ny}:${usedBase.baseDate}${usedBase.baseTime}`;
+  await cacheSet(finalKey, current, 1800).catch(() => {});
   return current;
 }
 
@@ -410,24 +460,33 @@ export function vilageFcstBase(offsetSlots = 0): { baseDate: string; baseTime: s
 }
 
 export async function getVilageFcst(grid: Grid): Promise<HourlyForecast[]> {
+  const primaryBase = vilageFcstBase();
+  const primaryCacheKey = `wfm:vfcst:${grid.nx},${grid.ny}:${primaryBase.baseDate}${primaryBase.baseTime}`;
+  const cached = await cacheGet<HourlyForecast[]>(primaryCacheKey).catch(() => null);
+  if (cached && cached.length > 0) return cached;
+
+  let usedBase = primaryBase;
   let items: KmaItem[];
   try {
-    const base = vilageFcstBase();
     items = await callKma("getVilageFcst", {
       numOfRows: "500", // 12카테고리 × ~40시간 — 오늘 저녁까지 넉넉히 커버
-      base_date: base.baseDate,
-      base_time: base.baseTime,
+      base_date: primaryBase.baseDate,
+      base_time: primaryBase.baseTime,
       nx: String(grid.nx),
       ny: String(grid.ny),
     });
   } catch (e) {
     // 발표 직후 미제공 구간이면 한 슬롯 전 발표분으로 재시도
     if (!(e instanceof Error && e.message === NO_DATA)) throw e;
-    const base = vilageFcstBase(1);
+    usedBase = vilageFcstBase(1);
+    const fallbackCacheKey = `wfm:vfcst:${grid.nx},${grid.ny}:${usedBase.baseDate}${usedBase.baseTime}`;
+    const fallbackCached = await cacheGet<HourlyForecast[]>(fallbackCacheKey).catch(() => null);
+    if (fallbackCached && fallbackCached.length > 0) return fallbackCached;
+
     items = await callKma("getVilageFcst", {
       numOfRows: "500",
-      base_date: base.baseDate,
-      base_time: base.baseTime,
+      base_date: usedBase.baseDate,
+      base_time: usedBase.baseTime,
       nx: String(grid.nx),
       ny: String(grid.ny),
     });
@@ -471,9 +530,16 @@ export async function getVilageFcst(grid: Grid): Promise<HourlyForecast[]> {
     }
   }
 
-  return [...byHour.entries()]
+  const result = [...byHour.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, entry]) => entry);
+
+  if (result.length > 0) {
+    const finalKey = `wfm:vfcst:${grid.nx},${grid.ny}:${usedBase.baseDate}${usedBase.baseTime}`;
+    // 단기예보는 3시간마다 발표되므로 2시간 30분 캐시
+    await cacheSet(finalKey, result, 9000).catch(() => {});
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

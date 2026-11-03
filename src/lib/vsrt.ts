@@ -21,16 +21,21 @@ function fmtKst(d: Date): string {
   )}${p(d.getUTCMinutes())}`;
 }
 
-// ASCII 격자 응답 → 숫자 배열 (37,697개). '#' 주석과 '=' 줄끝 마커 제거.
+// ASCII 격자 응답 → 숫자 배열 (37,697개). '#' 주석과 '=' 줄끝 마커 제거 (단일 패스 최적화).
 function parseGrid(text: string): number[] {
-  const values = text
-    .split("\n")
-    .filter((line) => !line.startsWith("#"))
-    .join(",")
-    .split(/[,\s=]+/)
-    .filter(Boolean)
-    .map(Number)
-    .filter((n) => !Number.isNaN(n));
+  const values: number[] = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line.charCodeAt(0) === 35) continue; // '#' === 35
+    const parts = line.split(/[,\s=]+/);
+    for (let j = 0; j < parts.length; j++) {
+      const token = parts[j];
+      if (!token) continue;
+      const n = Number(token);
+      if (!Number.isNaN(n)) values.push(n);
+    }
+  }
   return values;
 }
 
@@ -191,7 +196,7 @@ export async function getCloudMap(
   if (frames.length === 0) return null;
 
   const result: CloudMapData = { tmfc, center, size, cellKm: 5, frames };
-  await cacheSet(cacheKey, result, 300).catch(() => {});
+  await cacheSet(cacheKey, result, 540).catch(() => {});
   return result;
 }
 

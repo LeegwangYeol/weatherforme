@@ -128,11 +128,18 @@ describe("API Route Config & Headers Verification", () => {
     }) as typeof fetch;
 
     try {
-      const res = await getUltraSrtNcst({ nx: 62, ny: 123 });
+      // Unique grid coords so L1 cache starts cold
+      const res = await getUltraSrtNcst({ nx: 98, ny: 76 });
       assert.equal(res.temp, 21.5);
       assert.equal(res.humidity, 55);
       assert.ok(calledUrls.some((u) => u.includes("apis.data.go.kr")), "Tried data.go.kr first");
       assert.ok(calledUrls.some((u) => u.includes("apihub.kma.go.kr")), "Fell back to apihub.kma.go.kr");
+
+      // Second call for the same grid & baseTime must be served from L1/L2 cache with 0 network calls
+      const callCountBefore = calledUrls.length;
+      const cachedRes = await getUltraSrtNcst({ nx: 98, ny: 76 });
+      assert.equal(cachedRes.temp, 21.5);
+      assert.equal(calledUrls.length, callCountBefore, "Second call should hit cache without fetching KMA again");
     } finally {
       globalThis.fetch = origFetch;
       if (origServiceKey === undefined) delete process.env.KMA_SERVICE_KEY;

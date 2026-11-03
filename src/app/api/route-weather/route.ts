@@ -5,6 +5,7 @@ import {
   isKmaConfigured,
   type HourlyForecast,
 } from "@/lib/kma";
+import "@/lib/db";
 import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";

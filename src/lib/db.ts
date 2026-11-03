@@ -68,6 +68,8 @@ const g = globalThis as unknown as {
   __wfmUsers?: UserRecord[];
   __wfmNotified?: Map<string, number>;
   __wfmCache?: Map<string, { value: unknown; expiresAt: number }>;
+  __wfmCacheGet?: <T>(key: string) => Promise<T | null>;
+  __wfmCacheSet?: (key: string, value: unknown, ttlSeconds: number) => Promise<void>;
 };
 g.__wfmUsers ??= [];
 g.__wfmNotified ??= new Map();
@@ -107,24 +109,50 @@ export const removeUser = async (id: string) => {
 };
 
 // ---------------------------------------------------------------------------
-// 범용 TTL 캐시 (역지오코딩 결과 등)
+// 범용 TTL 캐시 (역지오코딩, 기상청 예보/실황, 비구름 격자 등)
+// L1(서버리스 인스턴스 메모리) + L2(Upstash Redis) 2계층 캐시로 CPU 및 네트워크 호출 최소화
 // ---------------------------------------------------------------------------
-export async function cacheGet<T>(key: string): Promise<T | null> {
-  if (!redis) {
-    const entry = g.__wfmCache!.get(key);
-    if (!entry || entry.expiresAt < Date.now()) return null;
-    return entry.value as T;
+const L1_MAX_ENTRIES = 250;
+const L1_MAX_TTL_MS = 10 * 60 * 1000; // L1 메모리는 최대 10분 유지 (데이터 신선도 보장)
+
+function l1Get<T>(key: string): T | null {
+  const entry = g.__wfmCache!.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    g.__wfmCache!.delete(key);
+    return null;
   }
-  return await redis.get<T>(key);
+  return entry.value as T;
+}
+
+function l1Set(key: string, value: unknown, ttlSeconds: number) {
+  if (g.__wfmCache!.size >= L1_MAX_ENTRIES) {
+    const firstKey = g.__wfmCache!.keys().next().value;
+    if (firstKey !== undefined) g.__wfmCache!.delete(firstKey);
+  }
+  const ttlMs = Math.min(ttlSeconds * 1000, L1_MAX_TTL_MS);
+  g.__wfmCache!.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+
+export async function cacheGet<T>(key: string): Promise<T | null> {
+  const mem = l1Get<T>(key);
+  if (mem !== null) return mem;
+  if (!redis) return null;
+  const val = await redis.get<T>(key);
+  if (val !== null && val !== undefined) {
+    l1Set(key, val, 300);
+  }
+  return val;
 }
 
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number) {
-  if (!redis) {
-    g.__wfmCache!.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
-    return;
-  }
+  l1Set(key, value, ttlSeconds);
+  if (!redis) return;
   await redis.set(key, value, { ex: ttlSeconds });
 }
+
+g.__wfmCacheGet = cacheGet;
+g.__wfmCacheSet = cacheSet;
 
 // ---------------------------------------------------------------------------
 // 알림 중복 방지 — 알림 발송 후 쿨다운 동안 같은 사용자에게 재발송하지 않음

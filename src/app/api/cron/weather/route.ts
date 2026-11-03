@@ -64,8 +64,23 @@ async function handleCron(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const force = searchParams.get("force");
+  const now = Date.now();
+
+  // 중복 스케줄러(외부 10분 크론 + GitHub Actions) 동시 호출 방지 — 90초 이내 재호출은 즉시 생략하여 CPU 절약
+  if (!force) {
+    const prevCron = await cacheGet<number>("wfm:lastCron").catch(() => null);
+    if (prevCron && now - prevCron < 90 * 1000) {
+      return NextResponse.json({
+        success: true,
+        skipped: "RECENTLY_RAN",
+        notificationsSent: 0,
+      });
+    }
+  }
+
   // 스케줄러 생존 확인용 — 상태 점검 카드에서 "마지막 서버 체크 시각"으로 표시
-  await cacheSet("wfm:lastCron", Date.now(), 60 * 60 * 24 * 7).catch(() => {});
+  await cacheSet("wfm:lastCron", now, 60 * 60 * 24 * 7).catch(() => {});
 
   if (!isKmaConfigured()) {
     return NextResponse.json({
@@ -112,6 +127,25 @@ async function handleCron(req: Request) {
     let gridErrors = 0;
 
     for (const [gridKey, targets] of byGrid) {
+      // 같은 격자 내에서 여러 관심지역이 겹칠 수 있으므로 유저당 1번만 알림을 보내도록 중복 제거
+      const uniqueTargets = [];
+      const seenUsers = new Set<string>();
+      for (const t of targets) {
+        if (!seenUsers.has(t.user.id)) {
+          seenUsers.add(t.user.id);
+          uniqueTargets.push(t);
+        }
+      }
+
+      // 쿨다운 중인 유저를 먼저 걸러내어, 알림 대상자가 없으면 예보 조회 자체를 생략 (CPU/네트워크 절약)
+      const activeTargets = [];
+      for (const target of uniqueTargets) {
+        if (!(await wasNotifiedRecently(target.user.id, gridKey))) {
+          activeTargets.push(target);
+        }
+      }
+      if (activeTargets.length === 0) continue;
+
       let event: PrecipEvent | null;
       try {
         const hourly = await getUltraSrtFcst(targets[0].grid);
@@ -123,19 +157,8 @@ async function handleCron(req: Request) {
       }
       if (!event) continue;
 
-      // 같은 격자 내에서 여러 관심지역이 겹칠 수 있으므로 유저당 1번만 알림을 보내도록 중복 제거
-      const uniqueTargets = [];
-      const seenUsers = new Set<string>();
-      for (const t of targets) {
-        if (!seenUsers.has(t.user.id)) {
-          seenUsers.add(t.user.id);
-          uniqueTargets.push(t);
-        }
-      }
-
-      for (const target of uniqueTargets) {
+      for (const target of activeTargets) {
         const { user, locationName } = target;
-        if (await wasNotifiedRecently(user.id, gridKey)) continue;
 
         const message = {
           ...buildMessage(event, locationName),
@@ -167,8 +190,7 @@ async function handleCron(req: Request) {
     // - 퇴근 리마인더: 퇴근 1시간 전, 초단기예보에 비가 있을 때만
     // - force=briefing|evening (인증 필수): 시각/요일/중복 무시하고 즉시 발송 (테스트용)
     // ------------------------------------------------------------------
-    const force = searchParams.get("force");
-    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const kst = new Date(now + 9 * 60 * 60 * 1000);
     const kstHour = kst.getUTCHours();
     const kstDay = kst.getUTCDay();
     const pad2 = (n: number) => String(n).padStart(2, "0");
