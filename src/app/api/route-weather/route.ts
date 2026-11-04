@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   routeGrids,
-  getUltraSrtFcst,
+  getRouteUltraSrtFcsts,
   isKmaConfigured,
   type HourlyForecast,
 } from "@/lib/kma";
@@ -37,7 +37,7 @@ export async function GET(req: Request) {
   const grids = routeGrids({ lat: aLat, lng: aLng }, { lat: bLat, lng: bLng });
 
   try {
-    const forecasts = await Promise.all(grids.map((g) => getUltraSrtFcst(g)));
+    const forecasts = await getRouteUltraSrtFcsts(grids);
 
     // 시간축은 첫 격자의 예보 시각 기준 (같은 발표분이라 전 격자 동일)
     const hours = forecasts[0].slice(0, 6).map((h) => ({ date: h.date, time: h.time }));
