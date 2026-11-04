@@ -275,6 +275,17 @@ export interface HourlyForecast {
   pop?: number | null; // 강수확률(%) — 단기예보에만 있음
 }
 
+export async function getRouteUltraSrtFcsts(grids: Grid[]): Promise<HourlyForecast[][]> {
+  const forecasts: HourlyForecast[][] = [];
+  const chunkSize = 5;
+  for (let i = 0; i < grids.length; i += chunkSize) {
+    const chunk = grids.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(chunk.map((g) => getUltraSrtFcst(g)));
+    forecasts.push(...chunkResults);
+  }
+  return forecasts;
+}
+
 export async function getUltraSrtFcst(grid: Grid): Promise<HourlyForecast[]> {
   const primaryBase = ultraSrtFcstBase();
   const primaryCacheKey = `wfm:ufcst:${grid.nx},${grid.ny}:${primaryBase.baseDate}${primaryBase.baseTime}`;
