@@ -91,7 +91,8 @@ async function handleCron(req: Request) {
   }
 
   // 스케줄러 지연으로 이벤트를 놓치지 않도록 기본 리드타임 3시간
-  const lookaheadHours = Number(process.env.RAIN_LOOKAHEAD_HOURS) || 3;
+  const lookaheadEnv = process.env.RAIN_LOOKAHEAD_HOURS;
+  const lookaheadHours = lookaheadEnv ? Number(lookaheadEnv) : 3;
 
   try {
     const users = await getUsers();
