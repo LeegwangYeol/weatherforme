@@ -27,7 +27,7 @@ import { logger } from "@/lib/logger";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// 주기적으로(기본 10분 간격, GitHub Actions) 호출되는 강수 감시 엔드포인트.
+// 주기적으로(기본 1시간 간격, GitHub Actions) 호출되는 강수 감시 엔드포인트.
 // 구독자를 기상청 격자 단위로 묶어 격자당 한 번만 예보를 조회한다.
 
 function buildMessage(event: PrecipEvent, locationName?: string): { title: string; body: string } {
@@ -67,7 +67,7 @@ async function handleCron(req: Request) {
   const force = searchParams.get("force");
   const now = Date.now();
 
-  // 중복 스케줄러(외부 5~10분 크론 + GitHub Actions) 과호출 방지 — 20분 이내 재호출은 L1 캐시에서 즉시 생략하여 CPU 절약
+  // 중복 스케줄러(외부 1시간 크론 + GitHub Actions) 과호출 방지 — 20분 이내 재호출은 L1 캐시에서 즉시 생략하여 CPU 절약
   if (!force) {
     const prevCron = await cacheGet<number>("wfm:lastCron").catch(() => null);
     if (prevCron && now - prevCron < 20 * 60 * 1000) {
