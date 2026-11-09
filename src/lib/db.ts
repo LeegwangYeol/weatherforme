@@ -158,7 +158,7 @@ g.__wfmCacheSet = cacheSet;
 // 알림 중복 방지 — 알림 발송 후 쿨다운 동안 같은 사용자에게 재발송하지 않음
 // ---------------------------------------------------------------------------
 const cooldownSeconds = () =>
-  (Number(process.env.NOTIFY_COOLDOWN_HOURS) || 3) * 3600;
+  (process.env.NOTIFY_COOLDOWN_HOURS ? Number(process.env.NOTIFY_COOLDOWN_HOURS) : 3) * 3600;
 
 export const wasNotifiedRecently = async (userId: string, gridKey: string): Promise<boolean> => {
   const cacheKey = `${userId}:${gridKey}`;
