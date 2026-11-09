@@ -57,9 +57,9 @@ async function handleCron(req: Request) {
   const { searchParams } = new URL(req.url);
   const authHeader = req.headers.get("authorization");
   const authorized =
-    !process.env.CRON_SECRET ||
-    authHeader === `Bearer ${process.env.CRON_SECRET}` ||
-    searchParams.get("key") === process.env.CRON_SECRET;
+    Boolean(process.env.CRON_SECRET) &&
+    (authHeader === `Bearer ${process.env.CRON_SECRET}` ||
+      searchParams.get("key") === process.env.CRON_SECRET);
   if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -91,7 +91,7 @@ async function handleCron(req: Request) {
   }
 
   // 스케줄러 지연으로 이벤트를 놓치지 않도록 기본 리드타임 3시간
-  const lookaheadHours = Number(process.env.RAIN_LOOKAHEAD_HOURS) || 3;
+  const lookaheadHours = process.env.RAIN_LOOKAHEAD_HOURS ? Number(process.env.RAIN_LOOKAHEAD_HOURS) : 3;
 
   try {
     const users = await getUsers();
