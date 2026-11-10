@@ -264,12 +264,19 @@ async function handleCron(req: Request) {
         start: number,
         end: number
       ): Promise<PrecipEvent | null> => {
-        for (const g of grids) {
-          try {
-            const ev = findPrecipInWindow(await fetcher(g), targetYmd, start, end);
+        for (let i = 0; i < grids.length; i += 5) {
+          const chunk = grids.slice(i, i + 5);
+          const chunkResults = await Promise.all(
+            chunk.map(async (g) => {
+              try {
+                return findPrecipInWindow(await fetcher(g), targetYmd, start, end);
+              } catch {
+                return null; // 개별 격자 실패는 무시 (양끝 판정은 별도 수행)
+              }
+            })
+          );
+          for (const ev of chunkResults) {
             if (ev) return ev;
-          } catch {
-            // 개별 격자 실패는 무시 (양끝 판정은 별도 수행)
           }
         }
         return null;
