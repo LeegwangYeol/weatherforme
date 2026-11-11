@@ -88,6 +88,61 @@ describe("API Route Config & Headers Verification", () => {
     assert.match(cronContent, /weather-evening/);
   });
 
+  test("checkCronAuth fail-closed behavior", async () => {
+    const { checkCronAuth } = await import("../src/lib/env.ts");
+
+    // When CRON_SECRET is not set, it should always fail (fail-closed)
+    delete process.env.CRON_SECRET;
+    const searchParams = new URLSearchParams();
+    assert.equal(checkCronAuth(null, searchParams), false);
+    assert.equal(checkCronAuth("Bearer some-token", searchParams), false);
+    searchParams.set("key", "some-token");
+    assert.equal(checkCronAuth(null, searchParams), false);
+
+    // When CRON_SECRET is set
+    process.env.CRON_SECRET = "my-secret";
+
+    // Invalid tokens should fail
+    assert.equal(checkCronAuth(null, new URLSearchParams()), false);
+    assert.equal(checkCronAuth("Bearer wrong-token", new URLSearchParams()), false);
+    searchParams.set("key", "wrong-token");
+    assert.equal(checkCronAuth(null, searchParams), false);
+
+    // Valid tokens should succeed
+    assert.equal(checkCronAuth("Bearer my-secret", new URLSearchParams()), true);
+    searchParams.set("key", "my-secret");
+    assert.equal(checkCronAuth(null, searchParams), true);
+  });
+
+  test("Environment variable number parsing functions safe handling", async () => {
+    const { getLookaheadHours } = await import("../src/lib/env.ts");
+    const { cooldownSeconds } = await import("../src/lib/db.ts");
+
+    // Default values when variables are unset
+    delete process.env.RAIN_LOOKAHEAD_HOURS;
+    delete process.env.NOTIFY_COOLDOWN_HOURS;
+    assert.equal(getLookaheadHours(), 3);
+    assert.equal(cooldownSeconds(), 3 * 3600);
+
+    // Handles '0' correctly (does not fall back to default)
+    process.env.RAIN_LOOKAHEAD_HOURS = "0";
+    process.env.NOTIFY_COOLDOWN_HOURS = "0";
+    assert.equal(getLookaheadHours(), 0);
+    assert.equal(cooldownSeconds(), 0);
+
+    // Handles invalid strings gracefully (falls back to default)
+    process.env.RAIN_LOOKAHEAD_HOURS = "invalid";
+    process.env.NOTIFY_COOLDOWN_HOURS = "invalid";
+    assert.equal(getLookaheadHours(), 3);
+    assert.equal(cooldownSeconds(), 3 * 3600);
+
+    // Handles valid numbers correctly
+    process.env.RAIN_LOOKAHEAD_HOURS = "5";
+    process.env.NOTIFY_COOLDOWN_HOURS = "2";
+    assert.equal(getLookaheadHours(), 5);
+    assert.equal(cooldownSeconds(), 2 * 3600);
+  });
+
   test("src/lib/kma.ts falls back from data.go.kr to apihub.kma.go.kr when gateway fails", async () => {
     const { getUltraSrtNcst } = await import("../src/lib/kma.ts");
     const origServiceKey = process.env.KMA_SERVICE_KEY;
