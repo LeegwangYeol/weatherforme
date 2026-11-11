@@ -23,6 +23,7 @@ import {
 } from "@/lib/kma";
 import { getWebPush } from "@/lib/push";
 import { logger } from "@/lib/logger";
+import { checkCronAuth, getLookaheadHours } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,11 +57,7 @@ async function handleCron(req: Request) {
   // CRON_SECRET 인증 — Bearer 헤더 또는 ?key= 쿼리 (QStash/cron-job.org 등 스케줄러 공용)
   const { searchParams } = new URL(req.url);
   const authHeader = req.headers.get("authorization");
-  const authorized =
-    !process.env.CRON_SECRET ||
-    authHeader === `Bearer ${process.env.CRON_SECRET}` ||
-    searchParams.get("key") === process.env.CRON_SECRET;
-  if (!authorized) {
+  if (!checkCronAuth(authHeader, searchParams)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -91,7 +88,7 @@ async function handleCron(req: Request) {
   }
 
   // 스케줄러 지연으로 이벤트를 놓치지 않도록 기본 리드타임 3시간
-  const lookaheadHours = Number(process.env.RAIN_LOOKAHEAD_HOURS) || 3;
+  const lookaheadHours = getLookaheadHours();
 
   try {
     const users = await getUsers();
