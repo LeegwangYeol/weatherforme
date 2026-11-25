@@ -17,7 +17,7 @@ export async function reverseGeocode(
     const res = await fetch(url, {
       headers: {
         // Nominatim 이용정책상 식별 가능한 User-Agent 필수
-        "User-Agent": "WeatherForMe/1.0 (https://weatherforme.vercel.app)",
+        "User-Agent": "WeatherForMe/1.0 (https://weatherforme-kohl.vercel.app)",
       },
       cache: "no-store",
     });
