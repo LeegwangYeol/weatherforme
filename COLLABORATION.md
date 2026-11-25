@@ -10,9 +10,9 @@
   - R3: Implemented Korean Pretendard/CJK typography stack, desktop centered shell (`max-w-md`), WCAG 2.1 AA contrast sharpening, shimmer skeleton UI, and visible focus rings.
   - Test & Linter Fixes: Refactored `tests/adversarial-stress.test.ts` to strictly eliminate `@typescript-eslint/no-explicit-any` errors.
   - Verification: 49/49 tests passing across 11 suites, ESLint 0 errors / 0 warnings, clean Next.js production build, CLEAN Forensic Audit.
-- **Latest Audit (2026-10-30)**:
-  - **Vercel Live Status**: `https://weatherforme.vercel.app` (`dpl_5oWL1msCBTqfMv6PSLUT5byXzGYH`) is **Ready & Healthy** (API endpoints, Redis, KMA API, KMA APIHub, Service Worker, and 5-minute GitHub Actions cron all verified).
-  - **Deployment Sync Gap**: The R1–R3 changes from Sep 1 (Sentry, `ErrorBoundary.tsx`, `logger.ts`, `max-w-md` desktop shell, shimmer skeleton, accessibility improvements) are currently **uncommitted in the local working tree** and not yet pushed/deployed to Vercel (`origin/main` is at `2de099b`, which has the `cf4cd24` app code plus `.github/workflows/jules-daily.yml` updates).
+- **Latest Audit (2026-11-25)**:
+  - **Vercel Live Status**: `https://weatherforme-kohl.vercel.app` (`bpscokr003-6892s-projects/weatherforme`) is **Ready & Live** (`persistentStore: true` via Upstash Redis `weatherforme-redis` Free Tier with `autoUpgrade=false`, `kmaConfigured: true`, `CRON_SECRET` enforced with `401` on unauth & `200` on Bearer token, GitHub Actions `APP_URL` & `CRON_SECRET` synced and verified green).
+  - **Remaining Optional Integrations**: `KMA_APIHUB_KEY` (`apihubConfigured: false`, optional — needed only for `/api/cloudmap` radar grid animation).
   - **Root-Cause Fixes Applied (2026-10-30)**:
     1. `src/lib/kma.ts`: Implemented dual-provider fallback (`KMA_SERVICE_KEY` data.go.kr → `KMA_APIHUB_KEY` apihub.kma.go.kr) with automatic retry and `cmmMsgHeader` gateway error detection to eliminate intermittent `KMA API error undefined: unknown` failures.
     2. `src/lib/vsrt.ts`: Added 5-minute Redis cache (`wfm:cloudmap:*`), `+1h` RN1 grid reuse, and 2-attempt retry with timeout in `fetchGrid` to eliminate `/api/cloudmap` timeouts.
