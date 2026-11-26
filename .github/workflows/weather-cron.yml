@@ -2,7 +2,7 @@
 # (Vercel 무료 플랜 크론은 하루 1회 제한이라 GitHub Actions를 주력으로 사용)
 #
 # 필요한 저장소 시크릿 (Settings → Secrets and variables → Actions):
-#   APP_URL     : 배포 주소 (예: https://weatherforme-kohl.vercel.app)
+#   APP_URL     : 보조 배포 주소 (예: https://weatherforme-kohl.vercel.app)
 #   CRON_SECRET : .env 의 CRON_SECRET 과 동일한 값
 name: weather-cron
 
@@ -18,8 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Call rain-watch endpoint
+      - name: Call rain-watch endpoint (prefer canonical weatherforme.vercel.app)
         run: |
+          TARGET_URL="https://weatherforme.vercel.app"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 8 "$TARGET_URL" || echo "000")
+          if [ "$STATUS" != "200" ] && [ -n "${{ secrets.APP_URL }}" ]; then
+            TARGET_URL="${{ secrets.APP_URL }}"
+          fi
+          echo "Using target: $TARGET_URL (canonical HTTP=$STATUS)"
           curl -fsS -m 45 \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.APP_URL }}/api/cron/weather"
+            "$TARGET_URL/api/cron/weather"
